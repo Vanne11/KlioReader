@@ -1,0 +1,43 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 231 15% 18%;
+    --foreground: 60 30% 96%;
+    --card: 231 15% 18%;
+    --card-foreground: 60 30% 96%;
+    --popover: 231 15% 18%;
+    --popover-foreground: 60 30% 96%;
+    --primary: 265 89% 78%;
+    --primary-foreground: 231 15% 18%;
+    --secondary: 231 15% 30%;
+    --secondary-foreground: 60% 30% 96%;
+    --muted: 225 27% 51%;
+    --muted-foreground: 60 30% 96%;
+    --accent: 326 100% 74%;
+    --accent-foreground: 231 15% 18%;
+    --destructive: 0 100% 65%;
+    --destructive-foreground: 60 30% 96%;
+    --border: 231 15% 30%;
+    --input: 231 15% 30%;
+    --ring: 265 89% 78%;
+    --radius: 0.5rem;
+  }
+}
+
+/* Limitar imágenes en contenido epub para que no excedan la página */
+.epub-reader-content img {
+  max-height: 60vh !important;
+  object-fit: contain;
+}
+
+/* Ocultar scrollbars en el modo paginado para limpieza visual */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

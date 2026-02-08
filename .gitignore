@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-ssr/
+backend-php/public/web/*
+!backend-php/public/web/.gitkeep
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# Backend PHP
+backend-php/.env
+backend-php/vendor/
+backend-php/uploads/*
+!backend-php/uploads/.gitkeep
+backend-php/composer.phar
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.sw?
+
+# Env
+.env
+.env.*
+*.local
