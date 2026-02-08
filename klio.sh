@@ -701,6 +701,22 @@ cmd_deps() {
                 info "Instalar con: ${CYAN}cargo install cargo-outdated${NC}"
             fi
             ;;
+        9)
+            if [[ -d "$TAURI_DIR/gen/android" ]]; then
+                info "El proyecto Android ya está inicializado"
+                if confirm "¿Re-inicializar? (se sobreescribirá la configuración)"; then
+                    cd "$PROJECT_DIR"
+                    npm run tauri android init
+                    success "Proyecto Android re-inicializado"
+                fi
+            else
+                check_android_env
+                step "Inicializando proyecto Android..."
+                cd "$PROJECT_DIR"
+                npm run tauri android init
+                success "Proyecto Android inicializado en ${CYAN}src-tauri/gen/android/${NC}"
+            fi
+            ;;
         0|"") return ;;
     esac
 
@@ -783,11 +799,33 @@ cmd_info() {
     cargo_ver=$(cargo --version 2>/dev/null | awk '{print $2}' || echo "${RED}no instalado${NC}")
     php_ver=$(php --version 2>/dev/null | head -1 | awk '{print $2}' || echo "${RED}no instalado${NC}")
 
+    local java_ver adb_ver
+    java_ver=$(java --version 2>&1 | head -1 | awk '{print $2}' 2>/dev/null || echo "no instalado")
+    adb_ver=$(adb --version 2>/dev/null | head -1 | awk '{print $NF}' || echo "no instalado")
+
     echo -e "    Node.js:   ${GREEN}${node_ver}${NC}"
     echo -e "    npm:       ${GREEN}${npm_ver}${NC}"
     echo -e "    Rust:      ${GREEN}${rust_ver}${NC}"
     echo -e "    Cargo:     ${GREEN}${cargo_ver}${NC}"
     echo -e "    PHP:       ${GREEN}${php_ver}${NC}"
+    echo -e "    Java/JDK:  ${GREEN}${java_ver}${NC}"
+    echo -e "    ADB:       ${GREEN}${adb_ver}${NC}"
+    echo ""
+
+    # Android
+    echo -e "  ${BOLD}Android:${NC}"
+    if [[ -n "${ANDROID_HOME:-}" ]]; then
+        echo -e "    ANDROID_HOME:  ${GREEN}${ANDROID_HOME}${NC}"
+    elif [[ -n "${ANDROID_SDK_ROOT:-}" ]]; then
+        echo -e "    ANDROID_SDK:   ${GREEN}${ANDROID_SDK_ROOT}${NC}"
+    else
+        echo -e "    SDK:           ${YELLOW}no configurado${NC}"
+    fi
+    if [[ -d "$TAURI_DIR/gen/android" ]]; then
+        echo -e "    Proyecto:      ${GREEN}inicializado${NC}"
+    else
+        echo -e "    Proyecto:      ${DIM}no inicializado${NC}"
+    fi
     echo ""
 
     # Git
@@ -951,6 +989,55 @@ cmd_doctor() {
             warn "$dep — verificar manualmente si tu distro usa otro nombre"
         fi
     done
+
+    echo ""
+
+    # Android
+    separator
+    echo -e "  ${BOLD}Entorno Android:${NC}"
+    echo ""
+
+    if [[ -n "${ANDROID_HOME:-}" ]]; then
+        success "ANDROID_HOME: $ANDROID_HOME"
+    elif [[ -n "${ANDROID_SDK_ROOT:-}" ]]; then
+        success "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
+    else
+        warn "ANDROID_HOME / ANDROID_SDK_ROOT no definido"
+    fi
+
+    if [[ -n "${JAVA_HOME:-}" ]]; then
+        success "JAVA_HOME: $JAVA_HOME"
+    elif command -v java &>/dev/null; then
+        success "Java: $(java --version 2>&1 | head -1)"
+    else
+        warn "Java/JDK no encontrado"
+    fi
+
+    if command -v adb &>/dev/null; then
+        success "ADB: $(adb --version 2>/dev/null | head -1)"
+        local devices
+        devices=$(adb devices 2>/dev/null | grep -c "device$" || echo "0")
+        if [[ "$devices" -gt 0 ]]; then
+            success "Dispositivos conectados: $devices"
+        else
+            info "No hay dispositivos/emuladores conectados"
+        fi
+    else
+        warn "ADB no encontrado (necesario para instalar APKs)"
+    fi
+
+    local ndk_home="${ANDROID_NDK_HOME:-${ANDROID_HOME:-}/ndk}"
+    if [[ -d "$ndk_home" ]] && [[ -n "$(ls -A "$ndk_home" 2>/dev/null)" ]]; then
+        success "NDK encontrado en: $ndk_home"
+    else
+        warn "Android NDK no encontrado (necesario para compilar Rust → Android)"
+    fi
+
+    if [[ -d "$TAURI_DIR/gen/android" ]]; then
+        success "Proyecto Android inicializado"
+    else
+        info "Proyecto Android no inicializado (ejecuta: Dependencias → Android init)"
+    fi
 
     echo ""
 
@@ -1234,7 +1321,7 @@ main_menu() {
         separator
         echo ""
         echo -e "    ${WHITE} 1${NC}) ${GREEN}🚀 Desarrollo${NC}        ${DIM}— Tauri dev, Vite, PHP server${NC}"
-        echo -e "    ${WHITE} 2${NC}) ${GREEN}📦 Build${NC}             ${DIM}— Compilar app (AppImage, DEB, RPM...)${NC}"
+        echo -e "    ${WHITE} 2${NC}) ${GREEN}📦 Build${NC}             ${DIM}— Compilar app (Desktop + Android)${NC}"
         echo -e "    ${WHITE} 3${NC}) ${YELLOW}🧹 Limpiar${NC}           ${DIM}— Eliminar paquetes y caches${NC}"
         echo -e "    ${WHITE} 4${NC}) ${CYAN}📋 Dependencias${NC}      ${DIM}— Instalar, actualizar, auditar${NC}"
         echo -e "    ${WHITE} 5${NC}) ${MAGENTA}🎨 Iconos${NC}            ${DIM}— Generar iconos de la app${NC}"
@@ -1288,6 +1375,7 @@ if [[ $# -gt 0 ]]; then
     case "$1" in
         dev)      cmd_dev ;;
         build)    cmd_build ;;
+        android)  cmd_build_android ;;
         clean)    cmd_clean ;;
         deps)     cmd_deps ;;
         icons)    cmd_icons ;;
@@ -1304,14 +1392,15 @@ if [[ $# -gt 0 ]]; then
             echo -e "  ${BOLD}Uso:${NC} ./klio.sh [comando]"
             echo ""
             echo -e "  ${BOLD}Comandos:${NC}"
-            echo -e "    dev       Opciones de desarrollo"
-            echo -e "    build     Compilar la aplicación"
+            echo -e "    dev       Opciones de desarrollo (Desktop + Android)"
+            echo -e "    build     Compilar la aplicación (Desktop + Android)"
+            echo -e "    android   Build Android directo (APK/AAB)"
             echo -e "    clean     Limpiar paquetes y caches"
-            echo -e "    deps      Gestionar dependencias"
+            echo -e "    deps      Gestionar dependencias (+ Android init)"
             echo -e "    icons     Generar iconos"
             echo -e "    info      Info del proyecto"
             echo -e "    git       Atajos de Git"
-            echo -e "    doctor    Diagnosticar entorno"
+            echo -e "    doctor    Diagnosticar entorno (+ Android)"
             echo -e "    loc       Contar líneas de código"
             echo -e "    version   Bump de versión"
             echo -e "    lint      Verificar código"
