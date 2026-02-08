@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS books (
     storage_type TEXT DEFAULT 'local',
     storage_file_id TEXT DEFAULT NULL,
     book_hash TEXT DEFAULT NULL,
+    stored_file_id INTEGER DEFAULT NULL,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -117,7 +118,19 @@ INSERT OR IGNORE INTO site_settings (key, value) VALUES
     ('registration_enabled', '1'),
     ('registration_closed_message', 'Por ahora no estamos aceptando registros. Muchas gracias por tu interes.');
 
+CREATE TABLE IF NOT EXISTS stored_files (
+    id INTEGER PRIMARY KEY,
+    file_hash TEXT UNIQUE NOT NULL,
+    file_size INTEGER DEFAULT 0,
+    file_type TEXT NOT NULL,
+    storage_type TEXT DEFAULT 'local',
+    storage_file_id TEXT DEFAULT NULL,
+    storage_path TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_books_user ON books(user_id);
 CREATE INDEX IF NOT EXISTS idx_notes_book ON notes(book_id);
 CREATE INDEX IF NOT EXISTS idx_bookmarks_book ON bookmarks(book_id);
 CREATE INDEX IF NOT EXISTS idx_reading_progress_user_book ON reading_progress(user_id, book_id);
+CREATE INDEX IF NOT EXISTS idx_stored_files_hash ON stored_files(file_hash);

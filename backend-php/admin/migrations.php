@@ -50,6 +50,22 @@ function get_executed_migrations() {
     return $map;
 }
 
+function get_restore_history() {
+    global $backupsDir;
+    $jsonPath = $backupsDir . '/restore_history.json';
+    if (!file_exists($jsonPath)) return array();
+    $data = json_decode(file_get_contents($jsonPath), true);
+    return is_array($data) ? $data : array();
+}
+
+function add_restore_entry($entry) {
+    global $backupsDir;
+    $jsonPath = $backupsDir . '/restore_history.json';
+    $history = get_restore_history();
+    $history[] = $entry;
+    file_put_contents($jsonPath, json_encode($history, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+}
+
 function create_backup($label = '') {
     global $dbPath, $backupsDir;
     if (!file_exists($dbPath)) return array('ok' => false, 'error' => 'Base de datos no encontrada');
@@ -79,7 +95,17 @@ function run_migration_file($filename) {
     $errorMsg = '';
     $ok = true;
     foreach ($statements as $stmt) {
-        if (empty($stmt) || strpos($stmt, '--') === 0) continue;
+        // Eliminar lineas de comentarios SQL del statement
+        $lines = explode("\n", $stmt);
+        $cleaned = array();
+        foreach ($lines as $line) {
+            $trimmedLine = trim($line);
+            if ($trimmedLine !== '' && strpos($trimmedLine, '--') !== 0) {
+                $cleaned[] = $line;
+            }
+        }
+        $stmt = trim(implode("\n", $cleaned));
+        if (empty($stmt)) continue;
         try {
             $pdo->exec($stmt);
         } catch (PDOException $e) {
@@ -198,6 +224,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         redirect(base_url('admin/migrations.php'));
     }
+
+    if ($action === 'restore_backup') {
+        $file = isset($_POST['filename']) ? basename($_POST['filename']) : '';
+        $reason = trim(isset($_POST['restore_reason']) ? $_POST['restore_reason'] : '');
+        $fullPath = $backupsDir . '/' . $file;
+        $realPath = realpath($fullPath);
+        $realBackups = realpath($backupsDir);
+
+        if (!$file || !$realPath || !$realBackups || strpos($realPath, $realBackups) !== 0 || !file_exists($realPath)) {
+            flash('error', 'Backup no encontrado.');
+        } elseif (strlen($reason) < 3) {
+            flash('error', 'Debes indicar una razon para la restauracion (minimo 3 caracteres).');
+        } else {
+            // Guardar la BD actual como "reemplazada"
+            $timestamp = date('Y-m-d_H-i-s');
+            $replacedName = 'replaced_' . $timestamp . '.db';
+            $replacedPath = $backupsDir . '/' . $replacedName;
+
+            // Cerrar conexion PDO antes de copiar
+            $pdo = null;
+
+            $savedCurrent = copy($dbPath, $replacedPath);
+            $restored = copy($realPath, $dbPath);
+
+            if (!$savedCurrent) {
+                flash('error', 'No se pudo guardar la base de datos actual antes de restaurar.');
+            } elseif (!$restored) {
+                flash('error', 'No se pudo restaurar el backup. La BD actual fue guardada como ' . $replacedName);
+            } else {
+                // Registrar en historial JSON
+                add_restore_entry(array(
+                    'date' => date('Y-m-d H:i:s'),
+                    'restored_from' => $file,
+                    'replaced_file' => $replacedName,
+                    'replaced_size' => filesize($replacedPath),
+                    'reason' => $reason,
+                    'admin_user' => isset($_SESSION['admin_username']) ? $_SESSION['admin_username'] : 'unknown',
+                ));
+                flash('success', 'Base de datos restaurada desde ' . $file . '. La BD anterior fue guardada como ' . $replacedName);
+            }
+        }
+        redirect(base_url('admin/migrations.php'));
+    }
 }
 
 // --- Datos para la vista ---
@@ -207,10 +276,13 @@ $pending = array();
 $history = array();
 
 foreach ($allFiles as $f) {
-    if (isset($executed[$f])) {
+    if (isset($executed[$f]) && (int)$executed[$f]['success'] === 1) {
         $history[] = $executed[$f];
     } else {
-        $pending[] = $f;
+        // Pendiente: incluir info de error si hubo un intento fallido previo
+        $lastError = (isset($executed[$f]) && !$executed[$f]['success']) ? $executed[$f]['error_message'] : null;
+        $lastAttempt = (isset($executed[$f]) && !$executed[$f]['success']) ? $executed[$f]['executed_at'] : null;
+        $pending[] = array('filename' => $f, 'last_error' => $lastError, 'last_attempt' => $lastAttempt);
     }
 }
 
@@ -230,9 +302,15 @@ if (is_dir($backupsDir)) {
     }
 }
 
+// Historial de restauraciones
+$restoreHistory = array_reverse(get_restore_history()); // mas recientes primero
+
 $countPending = count($pending);
+$countFailed = 0;
+foreach ($pending as $p) { if ($p['last_error']) $countFailed++; }
 $countExecuted = count($history);
 $countBackups = count($backupFiles);
+$countRestores = count($restoreHistory);
 
 $pageTitle = 'Migraciones';
 require_once __DIR__ . '/../templates/admin-layout.php';
@@ -241,10 +319,10 @@ require_once __DIR__ . '/../templates/admin-layout.php';
 <h1 class="text-2xl font-bold mb-6">Migraciones</h1>
 
 <!-- Stats -->
-<div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+<div class="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-8">
     <div class="stat-card">
         <div class="text-klio-muted text-xs font-medium uppercase tracking-wider">Pendientes</div>
-        <div class="text-2xl font-bold mt-1 <?php echo $countPending > 0 ? 'text-yellow-400' : 'text-green-400'; ?>"><?php echo $countPending; ?></div>
+        <div class="text-2xl font-bold mt-1 <?php echo $countPending > 0 ? ($countFailed > 0 ? 'text-red-400' : 'text-yellow-400') : 'text-green-400'; ?>"><?php echo $countPending; ?><?php if ($countFailed > 0): ?><span class="text-sm text-red-400 ml-1">(<?php echo $countFailed; ?> con error)</span><?php endif; ?></div>
     </div>
     <div class="stat-card">
         <div class="text-klio-muted text-xs font-medium uppercase tracking-wider">Ejecutadas</div>
@@ -253,6 +331,10 @@ require_once __DIR__ . '/../templates/admin-layout.php';
     <div class="stat-card">
         <div class="text-klio-muted text-xs font-medium uppercase tracking-wider">Backups</div>
         <div class="text-2xl font-bold mt-1"><?php echo $countBackups; ?></div>
+    </div>
+    <div class="stat-card">
+        <div class="text-klio-muted text-xs font-medium uppercase tracking-wider">Restauraciones</div>
+        <div class="text-2xl font-bold mt-1"><?php echo $countRestores; ?></div>
     </div>
 </div>
 
@@ -268,10 +350,18 @@ require_once __DIR__ . '/../templates/admin-layout.php';
     </div>
     <?php else: ?>
     <div class="p-5">
+        <?php if ($countFailed > 0): ?>
+        <div class="flex items-center gap-3 mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+            <div class="w-2 h-2 rounded-full bg-red-400"></div>
+            <span class="text-sm text-red-400"><?php echo $countFailed; ?> migracion(es) fallida(s) que puedes reintentar. Se creara un backup automatico antes de ejecutar.</span>
+        </div>
+        <?php endif; ?>
+        <?php if ($countPending - $countFailed > 0): ?>
         <div class="flex items-center gap-3 mb-4 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
             <div class="w-2 h-2 rounded-full bg-yellow-400"></div>
-            <span class="text-sm text-yellow-400">Hay <?php echo $countPending; ?> migracion(es) pendiente(s). Se creara un backup automatico antes de ejecutar.</span>
+            <span class="text-sm text-yellow-400">Hay <?php echo $countPending - $countFailed; ?> migracion(es) nueva(s) pendiente(s). Se creara un backup automatico antes de ejecutar.</span>
         </div>
+        <?php endif; ?>
         <table class="admin-table">
             <thead>
                 <tr>
@@ -283,21 +373,28 @@ require_once __DIR__ . '/../templates/admin-layout.php';
                 <?php foreach ($pending as $pf): ?>
                 <tr>
                     <td>
-                        <span class="font-mono text-sm"><?php echo e($pf); ?></span>
+                        <span class="font-mono text-sm"><?php echo e($pf['filename']); ?></span>
+                        <?php if ($pf['last_error']): ?>
+                        <div class="mt-1.5 p-2 rounded-lg bg-red-500/10 border border-red-500/20">
+                            <span class="text-xs text-red-400 font-medium">Ultimo intento fallido</span>
+                            <span class="text-xs text-klio-muted ml-1">(<?php echo e($pf['last_attempt']); ?>)</span>
+                            <div class="text-xs text-red-300/80 mt-0.5 font-mono break-all"><?php echo e($pf['last_error']); ?></div>
+                        </div>
+                        <?php endif; ?>
                     </td>
                     <td class="text-right">
-                        <form method="POST" class="inline-flex gap-2" onsubmit="return confirm('Ejecutar migracion <?php echo e($pf); ?>? Se creara un backup automatico.');">
+                        <form method="POST" class="inline-flex gap-2" onsubmit="return confirm('<?php echo $pf['last_error'] ? 'Reintentar' : 'Ejecutar'; ?> migracion <?php echo e($pf['filename']); ?>? Se creara un backup automatico.');">
                             <?php echo csrf_field(); ?>
                             <input type="hidden" name="action" value="run_migration">
-                            <input type="hidden" name="filename" value="<?php echo e($pf); ?>">
+                            <input type="hidden" name="filename" value="<?php echo e($pf['filename']); ?>">
                             <button type="submit" class="px-3 py-1.5 text-xs rounded-lg bg-klio-primary/15 text-klio-primary border border-klio-primary/30 hover:bg-klio-primary/25 transition-colors">
-                                Ejecutar
+                                <?php echo $pf['last_error'] ? 'Reintentar' : 'Ejecutar'; ?>
                             </button>
                         </form>
-                        <form method="POST" class="inline-flex gap-2" onsubmit="return confirm('Marcar <?php echo e($pf); ?> como ya ejecutada sin correrla?');">
+                        <form method="POST" class="inline-flex gap-2" onsubmit="return confirm('Marcar <?php echo e($pf['filename']); ?> como ya ejecutada sin correrla?');">
                             <?php echo csrf_field(); ?>
                             <input type="hidden" name="action" value="mark_executed">
-                            <input type="hidden" name="filename" value="<?php echo e($pf); ?>">
+                            <input type="hidden" name="filename" value="<?php echo e($pf['filename']); ?>">
                             <button type="submit" class="px-3 py-1.5 text-xs rounded-lg bg-klio-elevated text-klio-muted border border-klio-border hover:text-klio-text transition-colors">
                                 Marcar ejecutada
                             </button>
@@ -380,6 +477,9 @@ require_once __DIR__ . '/../templates/admin-layout.php';
                             Descargar
                         </button>
                     </form>
+                    <button type="button" onclick="openRestoreModal('<?php echo e($bf['name']); ?>')" class="px-2 py-1 text-xs rounded-lg bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 hover:bg-yellow-500/20 transition-colors ml-1">
+                        Restaurar
+                    </button>
                     <form method="POST" class="inline-flex ml-1" onsubmit="return confirm('Eliminar backup <?php echo e($bf['name']); ?>?');">
                         <?php echo csrf_field(); ?>
                         <input type="hidden" name="action" value="delete_backup">
@@ -395,6 +495,90 @@ require_once __DIR__ . '/../templates/admin-layout.php';
     </table>
     <?php endif; ?>
 </div>
+
+<!-- Historial de restauraciones -->
+<?php if ($countRestores > 0): ?>
+<div class="bg-klio-card border border-klio-border rounded-xl overflow-hidden mt-6">
+    <div class="px-5 py-4 border-b border-klio-border">
+        <h2 class="font-semibold text-sm">Historial de Restauraciones</h2>
+    </div>
+    <table class="admin-table">
+        <thead>
+            <tr>
+                <th>Fecha</th>
+                <th>Restaurado desde</th>
+                <th>BD reemplazada</th>
+                <th>Razon</th>
+                <th>Admin</th>
+            </tr>
+        </thead>
+        <tbody>
+            <?php foreach ($restoreHistory as $rh): ?>
+            <tr>
+                <td class="text-klio-muted text-xs whitespace-nowrap"><?php echo e($rh['date']); ?></td>
+                <td><span class="font-mono text-xs"><?php echo e($rh['restored_from']); ?></span></td>
+                <td><span class="font-mono text-xs"><?php echo e($rh['replaced_file']); ?></span></td>
+                <td class="text-sm max-w-xs"><?php echo e($rh['reason']); ?></td>
+                <td class="text-klio-muted text-xs"><?php echo e($rh['admin_user']); ?></td>
+            </tr>
+            <?php endforeach; ?>
+        </tbody>
+    </table>
+</div>
+<?php endif; ?>
+
+<!-- Modal restaurar backup -->
+<div id="restoreModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden items-center justify-center">
+    <div class="bg-klio-card border border-klio-border rounded-xl w-full max-w-md mx-4 shadow-2xl">
+        <div class="px-5 py-4 border-b border-klio-border">
+            <h3 class="font-semibold text-sm">Restaurar Base de Datos</h3>
+        </div>
+        <form method="POST" id="restoreForm">
+            <?php echo csrf_field(); ?>
+            <input type="hidden" name="action" value="restore_backup">
+            <input type="hidden" name="filename" id="restoreFilename" value="">
+            <div class="p-5">
+                <div class="flex items-center gap-3 mb-4 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+                    <div class="w-2 h-2 rounded-full bg-yellow-400 shrink-0"></div>
+                    <span class="text-xs text-yellow-400">La base de datos actual sera guardada automaticamente antes de reemplazarla.</span>
+                </div>
+                <p class="text-sm text-klio-muted mb-1">Restaurar: <span id="restoreFilenameDisplay" class="font-mono text-klio-text"></span></p>
+                <div class="mt-4">
+                    <label class="block text-sm text-klio-muted mb-2">Razon de la restauracion <span class="text-red-400">*</span></label>
+                    <textarea name="restore_reason" id="restoreReason" rows="3" required minlength="3" placeholder="Ej: Revertir migracion fallida, datos corruptos, etc." class="w-full px-3 py-2 rounded-lg bg-klio-elevated border border-klio-border text-klio-text text-sm placeholder-klio-muted/50 focus:outline-none focus:border-klio-primary resize-none"></textarea>
+                </div>
+            </div>
+            <div class="px-5 py-4 border-t border-klio-border flex justify-end gap-2">
+                <button type="button" onclick="closeRestoreModal()" class="px-4 py-2 text-xs rounded-lg bg-klio-elevated text-klio-muted border border-klio-border hover:text-klio-text transition-colors">
+                    Cancelar
+                </button>
+                <button type="submit" class="px-4 py-2 text-xs rounded-lg bg-yellow-500/15 text-yellow-400 border border-yellow-500/30 hover:bg-yellow-500/25 transition-colors font-medium">
+                    Restaurar
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function openRestoreModal(filename) {
+    document.getElementById('restoreFilename').value = filename;
+    document.getElementById('restoreFilenameDisplay').textContent = filename;
+    document.getElementById('restoreReason').value = '';
+    var modal = document.getElementById('restoreModal');
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+    document.getElementById('restoreReason').focus();
+}
+function closeRestoreModal() {
+    var modal = document.getElementById('restoreModal');
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+}
+document.getElementById('restoreModal').addEventListener('click', function(e) {
+    if (e.target === this) closeRestoreModal();
+});
+</script>
 
     </main>
 </div>
