@@ -7,7 +7,7 @@ import {
   Scroll as ScrollIcon, Columns2, Square, Maximize, Minimize,
   LayoutGrid, Grid2X2, List, Settings2,
   Cloud, CloudUpload, CloudDownload, LogIn, LogOut, User, Loader2, Server, Trash2, Pencil,
-  Play, ChevronLeft
+  Play, ChevronLeft, AlertTriangle, CheckCircle2, Info
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -95,6 +95,9 @@ function App() {
   const [editCloudForm, setEditCloudForm] = useState({ title: '', author: '', description: '' });
   const [editingLocalBook, setEditingLocalBook] = useState<Book | null>(null);
   const [editLocalForm, setEditLocalForm] = useState({ title: '', author: '', description: '' });
+  const [alertModal, setAlertModal] = useState<{ title: string; message: string; type: 'error' | 'success' | 'info' } | null>(null);
+  const [uploadingBookId, setUploadingBookId] = useState<string | null>(null);
+  const [downloadingBookId, setDownloadingBookId] = useState<number | null>(null);
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [numPages, setNumPages] = useState<number | null>(null);
@@ -291,14 +294,18 @@ function App() {
     setCloudBooks([]);
   }
 
+  function showAlert(type: 'error' | 'success' | 'info', title: string, message: string) {
+    setAlertModal({ title, message, type });
+  }
+
   async function loadCloudBooks() {
     if (!api.isLoggedIn()) return;
     setCloudLoading(true);
     try {
       const books = await api.listBooks();
       setCloudBooks(books);
-    } catch (err) {
-      console.error("Error loading cloud books:", err);
+    } catch (err: any) {
+      showAlert('error', 'Error al cargar libros', err.message || 'No se pudieron cargar los libros de la nube');
     } finally {
       setCloudLoading(false);
     }
@@ -306,6 +313,8 @@ function App() {
 
   async function uploadBookToCloud(book: Book) {
     if (!api.isLoggedIn()) return;
+    if (uploadingBookId) return;
+    setUploadingBookId(book.id);
     try {
       const bytes: number[] = await invoke("read_file_bytes", { path: book.path });
       const blob = new Blob([new Uint8Array(bytes)], {
@@ -313,7 +322,7 @@ function App() {
       });
       const fileName = book.path.split('/').pop() || 'book';
       const file = new File([blob], fileName, { type: blob.type });
-      await api.uploadBook(file, {
+      const result = await api.uploadBook(file, {
         title: book.title,
         author: book.author,
         total_chapters: book.total_chapters,
@@ -321,13 +330,24 @@ function App() {
         description: book.description || undefined,
       });
       loadCloudBooks();
-    } catch (err) {
-      console.error("Error uploading:", err);
+      let msg = `"${result.title}" se subió correctamente`;
+      if (result.deduplicated) msg += ' (archivo reutilizado)';
+      if (result.progress_restored) msg += `\nProgreso restaurado: ${result.restored_progress_percent}%`;
+      showAlert('success', 'Libro subido', msg);
+    } catch (err: any) {
+      showAlert('error', 'Error al subir libro', err.message || 'No se pudo subir el libro al servidor');
+    } finally {
+      setUploadingBookId(null);
     }
   }
 
   async function downloadBookFromCloud(cloudBook: api.CloudBook) {
-    if (!libraryPath) return;
+    if (!libraryPath) {
+      showAlert('info', 'Sin carpeta de biblioteca', 'Configura una carpeta de biblioteca local primero');
+      return;
+    }
+    if (downloadingBookId) return;
+    setDownloadingBookId(cloudBook.id);
     try {
       const blob = await api.downloadBook(cloudBook.id);
       const arrayBuffer = await blob.arrayBuffer();
@@ -335,8 +355,11 @@ function App() {
       const savePath = `${libraryPath}/${cloudBook.file_name}`;
       await invoke("save_file_bytes", { path: savePath, bytes });
       scanLibrary(libraryPath);
-    } catch (err) {
-      console.error("Error downloading:", err);
+      showAlert('success', 'Libro descargado', `"${cloudBook.title}" se guardó en tu biblioteca local`);
+    } catch (err: any) {
+      showAlert('error', 'Error al descargar', err.message || 'No se pudo descargar el libro');
+    } finally {
+      setDownloadingBookId(null);
     }
   }
 
@@ -344,8 +367,9 @@ function App() {
     try {
       await api.deleteBook(id);
       setCloudBooks(prev => prev.filter(b => b.id !== id));
-    } catch (err) {
-      console.error("Error deleting:", err);
+      showAlert('success', 'Libro eliminado', 'El libro se eliminó de la nube. El progreso de lectura fue archivado.');
+    } catch (err: any) {
+      showAlert('error', 'Error al eliminar', err.message || 'No se pudo eliminar el libro');
     }
   }
 
@@ -360,8 +384,8 @@ function App() {
       await api.updateBook(editingCloudBook.id, editCloudForm);
       setEditingCloudBook(null);
       loadCloudBooks();
-    } catch (err) {
-      console.error("Error updating book:", err);
+    } catch (err: any) {
+      showAlert('error', 'Error al editar', err.message || 'No se pudo actualizar el libro');
     }
   }
 
@@ -830,7 +854,11 @@ function App() {
                       {libraryView === 'grid-large' && (
                         <div className="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                           <Button size="icon" variant="ghost" className="h-8 w-8 bg-black/50 hover:bg-primary/80 rounded-full" onClick={(e) => { e.stopPropagation(); startEditLocalBook(book); }}><Pencil className="w-4 h-4" /></Button>
-                          {authUser && <Button size="icon" variant="ghost" className="h-8 w-8 bg-black/50 hover:bg-blue-600 rounded-full" onClick={(e) => { e.stopPropagation(); uploadBookToCloud(book); }}><CloudUpload className="w-4 h-4" /></Button>}
+                          {authUser && (
+                            <Button size="icon" variant="ghost" className="h-8 w-8 bg-black/50 hover:bg-blue-600 rounded-full" disabled={uploadingBookId === book.id} onClick={(e) => { e.stopPropagation(); uploadBookToCloud(book); }}>
+                              {uploadingBookId === book.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <CloudUpload className="w-4 h-4" />}
+                            </Button>
+                          )}
                         </div>
                       )}
                     </div>
@@ -946,7 +974,9 @@ function App() {
                                 <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-primary/20 hover:text-primary" onClick={() => startEditCloudBook(cb)}><Pencil className="w-4 h-4" /></Button>
                               </TooltipTrigger><TooltipContent>Editar</TooltipContent></Tooltip>
                               <Tooltip><TooltipTrigger asChild>
-                                <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-green-600/20 hover:text-green-400" onClick={() => downloadBookFromCloud(cb)}><CloudDownload className="w-4 h-4" /></Button>
+                                <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-green-600/20 hover:text-green-400" disabled={downloadingBookId === cb.id} onClick={() => downloadBookFromCloud(cb)}>
+                                  {downloadingBookId === cb.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <CloudDownload className="w-4 h-4" />}
+                                </Button>
                               </TooltipTrigger><TooltipContent>Descargar a local</TooltipContent></Tooltip>
                               <Tooltip><TooltipTrigger asChild>
                                 <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-red-600/20 hover:text-red-400" onClick={() => deleteCloudBook(cb.id)}><Trash2 className="w-4 h-4" /></Button>
@@ -1024,6 +1054,29 @@ function App() {
   return (
     <TooltipProvider>
       {renderContent()}
+      {/* Modal de alertas global */}
+      <Dialog open={!!alertModal} onOpenChange={(open) => { if (!open) setAlertModal(null); }}>
+        <DialogContent className="sm:max-w-[400px] bg-[#16161e] border-white/10 text-white">
+          <div className="flex flex-col items-center text-center py-6 space-y-4">
+            {alertModal?.type === 'error' && <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center"><AlertTriangle className="w-8 h-8 text-red-400" /></div>}
+            {alertModal?.type === 'success' && <div className="w-16 h-16 rounded-full bg-green-500/10 flex items-center justify-center"><CheckCircle2 className="w-8 h-8 text-green-400" /></div>}
+            {alertModal?.type === 'info' && <div className="w-16 h-16 rounded-full bg-blue-500/10 flex items-center justify-center"><Info className="w-8 h-8 text-blue-400" /></div>}
+            <DialogHeader>
+              <DialogTitle className={`text-lg font-bold ${alertModal?.type === 'error' ? 'text-red-400' : alertModal?.type === 'success' ? 'text-green-400' : 'text-blue-400'}`}>
+                {alertModal?.title}
+              </DialogTitle>
+            </DialogHeader>
+            <p className="text-sm opacity-70 whitespace-pre-line">{alertModal?.message}</p>
+            <Button
+              className={`w-full mt-2 font-bold ${alertModal?.type === 'error' ? 'bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30' : alertModal?.type === 'success' ? 'bg-green-500/20 hover:bg-green-500/30 text-green-400 border border-green-500/30' : ''}`}
+              variant={alertModal?.type === 'info' ? 'default' : 'ghost'}
+              onClick={() => setAlertModal(null)}
+            >
+              Aceptar
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </TooltipProvider>
   );
 }

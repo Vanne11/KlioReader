@@ -139,6 +139,25 @@ export interface UserStats {
   last_streak_date: string | null;
 }
 
+export interface CheckHashResponse {
+  exists: boolean;
+  file_size?: number;
+  file_type?: string;
+}
+
+export interface UploadResponse {
+  id: number;
+  title: string;
+  author: string;
+  file_name: string;
+  file_type: string;
+  file_size: number;
+  storage_type: string;
+  deduplicated: boolean;
+  progress_restored: boolean;
+  restored_progress_percent?: number;
+}
+
 // ── Auth ──
 
 export async function register(
@@ -208,22 +227,34 @@ export async function getBook(id: number): Promise<CloudBook> {
   return request<CloudBook>(`/api/books/${id}`);
 }
 
+export async function checkHash(md5: string): Promise<CheckHashResponse> {
+  return request<CheckHashResponse>("/api/books/check-hash", {
+    method: "POST",
+    body: JSON.stringify({ md5 }),
+  });
+}
+
 export async function uploadBook(
-  file: File,
-  metadata?: { title?: string; author?: string; total_chapters?: number; cover_base64?: string; description?: string }
-): Promise<CloudBook> {
+  file: File | null,
+  metadata?: { title?: string; author?: string; total_chapters?: number; cover_base64?: string; description?: string; file_hash?: string }
+): Promise<UploadResponse> {
   const form = new FormData();
-  form.append("file", file);
+  if (file) form.append("file", file);
+  if (metadata?.file_hash) form.append("file_hash", metadata.file_hash);
   if (metadata?.title) form.append("title", metadata.title);
   if (metadata?.author) form.append("author", metadata.author);
   if (metadata?.total_chapters) form.append("total_chapters", String(metadata.total_chapters));
   if (metadata?.cover_base64) form.append("cover_base64", metadata.cover_base64);
   if (metadata?.description) form.append("description", metadata.description);
 
-  return request<CloudBook>("/api/books/upload", {
+  return request<UploadResponse>("/api/books/upload", {
     method: "POST",
     body: form,
   });
+}
+
+export async function deleteAccount(): Promise<void> {
+  await request("/api/user/delete", { method: "DELETE" });
 }
 
 export async function downloadBook(id: number): Promise<Blob> {
