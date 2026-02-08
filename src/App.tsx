@@ -6,7 +6,8 @@ import {
   ZoomIn, ZoomOut,
   Scroll as ScrollIcon, Columns2, Square, Maximize, Minimize,
   LayoutGrid, Grid2X2, List, Settings2,
-  Cloud, CloudUpload, CloudDownload, LogIn, LogOut, User, Loader2, Server, Trash2, Pencil
+  Cloud, CloudUpload, CloudDownload, LogIn, LogOut, User, Loader2, Server, Trash2, Pencil,
+  Play, ChevronLeft
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -71,6 +72,7 @@ function App() {
   const [activeTab, setActiveTab] = useState("library");
   const [books, setBooks] = useState<Book[]>([]);
   const [currentBook, setCurrentBook] = useState<Book | null>(null);
+  const [selectedBook, setSelectedBook] = useState<Book | null>(null);
   const [epubContent, setEpubContent] = useState<string>("");
   const [libraryPath, setLibraryPath] = useState<string | null>(localStorage.getItem("libraryPath"));
   
@@ -383,6 +385,7 @@ function App() {
   }, [authUser]);
 
   async function readBook(book: Book) {
+    setSelectedBook(null);
     setCurrentBook(book);
     setCurrentPageInChapter(0);
     setStats(prev => updateStreak(prev));
@@ -562,6 +565,126 @@ function App() {
       );
     }
 
+    if (selectedBook) {
+      return (
+        <div className="flex flex-col h-screen bg-[#0f0f14] text-white font-sans overflow-hidden relative">
+          {/* Background Decor */}
+          <div className="absolute inset-0 opacity-20 pointer-events-none overflow-hidden">
+             {selectedBook.cover && (
+               <img 
+                 src={`data:image/png;base64,${selectedBook.cover}`} 
+                 className="w-full h-full object-cover blur-[100px] scale-150" 
+                 alt="" 
+               />
+             )}
+          </div>
+
+          <header className="h-20 border-b border-white/5 flex items-center justify-between px-12 bg-[#16161e]/40 backdrop-blur-xl z-50">
+            <Button variant="ghost" onClick={() => setSelectedBook(null)} className="gap-2 hover:bg-white/5 group transition-all">
+              <ChevronLeft className="w-5 h-5 group-hover:-translate-x-1 transition-transform" /> 
+              <span className="font-bold tracking-tight text-sm">BIBLIOTECA</span>
+            </Button>
+            
+            <div className="flex items-center gap-6">
+              <div className="text-right hidden sm:block">
+                <p className="text-[10px] font-bold opacity-40 uppercase tracking-[0.2em] mb-0.5">Estado</p>
+                <p className="text-xs font-black text-amber-400 uppercase">{selectedBook.progress === 0 ? 'Sin empezar' : `Leído ${selectedBook.progress}%`}</p>
+              </div>
+              <Button 
+                onClick={() => readBook(selectedBook)} 
+                className="gap-3 bg-primary hover:bg-primary/90 text-primary-foreground font-black px-10 py-6 rounded-full shadow-[0_10px_30px_rgba(var(--primary),0.3)] hover:scale-105 transition-all active:scale-95"
+              >
+                <Play className="w-5 h-5 fill-current" /> 
+                <span className="tracking-widest uppercase">Leer Libro</span>
+              </Button>
+            </div>
+          </header>
+          
+          <ScrollArea className="flex-1 z-10">
+            <div className="max-w-6xl mx-auto px-12 py-16">
+              <div className="flex flex-col lg:flex-row gap-20 items-start">
+                {/* Book Cover */}
+                <div className="w-full lg:w-[400px] shrink-0 mx-auto lg:mx-0">
+                  <div className="relative group">
+                    <div className="absolute -inset-4 bg-primary/20 rounded-[2rem] blur-2xl opacity-0 group-hover:opacity-100 transition-duration-700" />
+                    <div className="relative aspect-[3/4.5] rounded-2xl overflow-hidden shadow-[0_30px_60px_-15px_rgba(0,0,0,0.8)] border border-white/10 bg-black/40">
+                      {selectedBook.cover ? (
+                        <img src={`data:image/png;base64,${selectedBook.cover}`} className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105" alt={selectedBook.title} />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center opacity-10">
+                          <BookOpen className="w-32 h-32" />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <div className="mt-12 space-y-6 bg-white/5 p-8 rounded-2xl border border-white/5 backdrop-blur-md">
+                     <div className="flex justify-between items-end">
+                       <div className="space-y-1">
+                         <p className="text-[10px] font-black opacity-30 uppercase tracking-widest">Tu Progreso</p>
+                         <p className="text-2xl font-black">{selectedBook.progress}%</p>
+                       </div>
+                       <Badge variant="outline" className="border-primary/30 text-primary text-[10px] px-3 py-1 font-bold">
+                         {selectedBook.type.toUpperCase()}
+                       </Badge>
+                     </div>
+                     <Progress value={selectedBook.progress} className="h-2.5 bg-white/5" indicatorClassName="bg-gradient-to-r from-amber-600 to-amber-400 shadow-[0_0_15px_rgba(251,191,36,0.4)]" />
+                     <div className="flex justify-between text-[10px] font-bold opacity-30 uppercase tracking-tighter">
+                       <span>{selectedBook.currentChapter} {selectedBook.type === 'pdf' ? 'páginas' : 'capítulos'} leídos</span>
+                       <span>{selectedBook.total_chapters} total</span>
+                     </div>
+                  </div>
+                </div>
+                
+                {/* Book Info */}
+                <div className="flex-1 space-y-12">
+                  <div className="space-y-4">
+                    <Badge className="bg-primary/10 text-primary hover:bg-primary/20 border-none px-4 py-1.5 rounded-full text-[10px] font-black tracking-widest uppercase">
+                      Información del libro
+                    </Badge>
+                    <h1 className="text-5xl lg:text-7xl font-black leading-[1.1] tracking-tight text-white drop-shadow-2xl">
+                      {selectedBook.title}
+                    </h1>
+                    <div className="flex items-center gap-4 pt-2">
+                       <div className="w-12 h-0.5 bg-primary/50" />
+                       <p className="text-2xl font-medium italic text-primary/80 tracking-tight">{selectedBook.author}</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-8">
+                     <div className="space-y-1">
+                       <p className="text-[10px] font-black opacity-30 uppercase tracking-widest">Formato</p>
+                       <p className="text-lg font-bold uppercase">{selectedBook.type}</p>
+                     </div>
+                     <div className="space-y-1">
+                       <p className="text-[10px] font-black opacity-30 uppercase tracking-widest">Extensión</p>
+                       <p className="text-lg font-bold">{selectedBook.total_chapters} {selectedBook.type === 'pdf' ? 'Páginas' : 'Capítulos'}</p>
+                     </div>
+                     <div className="space-y-1">
+                       <p className="text-[10px] font-black opacity-30 uppercase tracking-widest">Última vez</p>
+                       <p className="text-lg font-bold truncate">{selectedBook.lastRead}</p>
+                     </div>
+                  </div>
+
+                  <Separator className="opacity-10" />
+                  
+                  <div className="space-y-6">
+                    <div className="flex items-center gap-3">
+                      <List className="w-5 h-5 text-primary/60" />
+                      <h3 className="text-sm font-black uppercase tracking-[0.2em] opacity-50">Sinopsis</h3>
+                    </div>
+                    <div className="text-xl leading-[1.8] text-white/70 font-serif max-w-3xl selection:bg-primary/30 first-letter:text-5xl first-letter:font-black first-letter:mr-3 first-letter:float-left first-letter:text-primary">
+                      {selectedBook.description || "No hay una descripción disponible para este libro en sus metadatos. Puedes editar la información del libro para añadir una sinopsis personalizada."}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </ScrollArea>
+        </div>
+      );
+    }
+
     return (
       <div className="flex h-screen bg-[#0f0f14] text-white font-sans overflow-hidden">
         <aside className="w-64 border-r border-white/5 bg-[#16161e] flex flex-col">
@@ -614,37 +737,88 @@ function App() {
                 `}>
                   {books.map((book) => (
                     <div key={book.id} className="cursor-pointer group relative">
-                      <div onClick={() => readBook(book)}>
+                      <div onClick={() => setSelectedBook(book)}>
                         {libraryView === 'grid-large' && (
-                          <Card className="bg-[#16161e] border-white/5 hover:border-primary/50 transition-all overflow-hidden shadow-[0_35px_60px_-15px_rgba(0,0,0,0.6)] flex flex-col">
-                            <div className="aspect-[3/4] relative overflow-hidden bg-black/40">
-                              {book.cover ? <img src={`data:image/png;base64,${book.cover}`} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" alt="" /> : <div className="w-full h-full flex items-center justify-center opacity-10"><BookOpen className="w-24 h-24" /></div>}
-                              <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black via-black/60 to-transparent">
-                                <Progress value={book.progress} className="h-3 bg-white/10" indicatorClassName="bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.5)]" />
-                                <div className="mt-2 flex justify-between items-center font-black text-[9px] text-amber-400 tracking-tighter"><span>{book.progress}% COMPLETADO</span><Badge className="bg-primary/20 text-primary border-none text-[8px]">{book.type}</Badge></div>
+                          <Card className="bg-[#16161e] border-white/5 hover:border-primary/50 transition-all overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.5)] flex flex-col group">
+                            <div className="aspect-[2/3] relative overflow-hidden bg-black/60 flex items-center justify-center">
+                              {book.cover ? (
+                                <>
+                                  <img 
+                                    src={`data:image/png;base64,${book.cover}`} 
+                                    className="absolute inset-0 w-full h-full object-cover blur-2xl opacity-40 scale-110" 
+                                    alt="" 
+                                  />
+                                  <img 
+                                    src={`data:image/png;base64,${book.cover}`} 
+                                    className="relative z-10 w-full h-full object-contain shadow-2xl transition-transform duration-700 group-hover:scale-105" 
+                                    alt="" 
+                                  />
+                                </>
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center opacity-10">
+                                  <BookOpen className="w-24 h-24" />
+                                </div>
+                              )}
+                              <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black via-black/80 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-20">
+                                <Progress value={book.progress} className="h-1.5 bg-white/20" indicatorClassName="bg-amber-400" />
+                                <p className="mt-2 text-[9px] font-black text-amber-400 tracking-tighter">{book.progress}% LEÍDO</p>
                               </div>
                             </div>
-                            <div className="p-8 bg-[#1c1c26] border-t border-white/5"><h3 className="text-xl font-black group-hover:text-primary transition-colors line-clamp-2 leading-tight">{book.title}</h3><p className="text-sm opacity-40 mt-2 italic">{book.author}</p></div>
+                            <div className="p-6 bg-[#1c1c26] border-t border-white/5 relative z-30">
+                              <h3 className="text-lg font-black group-hover:text-primary transition-colors line-clamp-2 leading-tight uppercase tracking-tight">{book.title}</h3>
+                              <p className="text-xs opacity-40 mt-1 italic font-medium">{book.author}</p>
+                            </div>
                           </Card>
                         )}
                         {libraryView === 'grid-mini' && (
-                          <div className="w-24 aspect-[2/3] relative rounded-md overflow-hidden hover:ring-2 ring-primary transition-all shadow-lg bg-black/20">
-                            {book.cover ? <img src={`data:image/png;base64,${book.cover}`} className="w-full h-full object-cover" alt="" /> : <div className="w-full h-full bg-white/5 flex items-center justify-center opacity-10"><BookOpen className="w-6 h-6" /></div>}
-                            <div className="absolute bottom-0 left-0 right-0 h-1"><Progress value={book.progress} className="h-full rounded-none bg-black/50" indicatorClassName="bg-amber-400" /></div>
+                          <div className="w-24 aspect-[2/3] relative rounded-lg overflow-hidden ring-1 ring-white/10 hover:ring-primary transition-all shadow-xl bg-black/60 group flex items-center justify-center">
+                            {book.cover ? (
+                              <>
+                                <img src={`data:image/png;base64,${book.cover}`} className="absolute inset-0 w-full h-full object-cover blur-lg opacity-40 scale-125" alt="" />
+                                <img src={`data:image/png;base64,${book.cover}`} className="relative z-10 w-full h-full object-contain group-hover:scale-110 transition-transform duration-500" alt="" />
+                              </>
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center opacity-10">
+                                <BookOpen className="w-8 h-8" />
+                              </div>
+                            )}
+                            <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/60 z-20">
+                              <div className="h-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]" style={{ width: `${book.progress}%` }} />
+                            </div>
                           </div>
                         )}
                         {libraryView === 'grid-card' && (
-                          <Card className="bg-transparent border-none space-y-2 hover:scale-105 transition-transform">
-                            <div className="aspect-[2/3] relative rounded-md overflow-hidden shadow-md bg-black/20">
-                              {book.cover ? <img src={`data:image/png;base64,${book.cover}`} className="w-full h-full object-cover" alt="" /> : <div className="w-full h-full bg-white/5" />}
-                              <div className="absolute bottom-0 left-0 right-0 h-1"><Progress value={book.progress} className="h-full rounded-none bg-black/50" indicatorClassName="bg-amber-400" /></div>
+                          <Card className="bg-transparent border-none space-y-2 hover:translate-y-[-4px] transition-all duration-300 group">
+                            <div className="aspect-[2/3] relative rounded-lg overflow-hidden shadow-lg border border-white/5 bg-black/60 flex items-center justify-center">
+                              {book.cover ? (
+                                <>
+                                  <img src={`data:image/png;base64,${book.cover}`} className="absolute inset-0 w-full h-full object-cover blur-lg opacity-40 scale-125" alt="" />
+                                  <img src={`data:image/png;base64,${book.cover}`} className="relative z-10 w-full h-full object-contain group-hover:scale-105 transition-transform duration-500" alt="" />
+                                </>
+                              ) : (
+                                <div className="w-full h-full bg-white/5 flex items-center justify-center opacity-5">
+                                  <BookOpen className="w-10 h-10" />
+                                </div>
+                              )}
+                              <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/40 z-20">
+                                <div className="h-full bg-amber-400" style={{ width: `${book.progress}%` }} />
+                              </div>
                             </div>
-                            <div className="text-[10px] font-medium opacity-80 line-clamp-2">{book.title}</div>
+                            <div className="text-[10px] font-black opacity-60 line-clamp-2 uppercase tracking-tight group-hover:opacity-100 transition-opacity leading-tight">{book.title}</div>
                           </Card>
                         )}
                         {libraryView === 'list-info' && (
-                          <Card className="flex bg-white/5 border-white/5 hover:bg-white/10 p-4 gap-6 items-center">
-                            <div className="w-16 aspect-[2/3] rounded bg-[#0f0f14] overflow-hidden shrink-0 border border-white/10 flex items-center justify-center">{book.cover ? <img src={`data:image/png;base64,${book.cover}`} className="w-full h-full object-contain" alt="" /> : <BookOpen className="w-6 h-6 opacity-10" />}</div>
+                          <Card className="flex bg-[#1c1c26]/50 border-white/5 hover:bg-white/10 p-4 gap-6 items-center transition-all group">
+                            <div className="w-16 aspect-[2/3] rounded-md bg-[#0f0f14] overflow-hidden shrink-0 border border-white/10 flex items-center justify-center shadow-lg relative">
+                              {book.cover ? (
+                                <>
+                                  <img src={`data:image/png;base64,${book.cover}`} className="absolute inset-0 w-full h-full object-cover blur-md opacity-40 scale-125" alt="" />
+                                  <img src={`data:image/png;base64,${book.cover}`} className="relative z-10 w-full h-full object-contain group-hover:scale-110 transition-transform duration-500" alt="" />
+                                </>
+                              ) : (
+                                <BookOpen className="w-6 h-6 opacity-10" />
+                              )}
+                            </div>
                             <div className="flex-1 space-y-2">
                               <div><h3 className="text-sm font-bold group-hover:text-primary transition-colors line-clamp-1">{book.title}</h3><p className="text-[10px] opacity-50 italic">{book.author}</p></div>
                               <div className="flex items-center gap-4"><div className="flex-1 max-w-[200px]"><Progress value={book.progress} className="h-1 bg-white/5" indicatorClassName="bg-amber-400" /></div><span className="text-[9px] font-bold text-amber-400">{book.progress}%</span><Badge variant="outline" className="text-[8px] h-4 opacity-50">{book.type}</Badge></div>
