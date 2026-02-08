@@ -165,19 +165,33 @@ class BookController
             return;
         }
 
-        // Save file
+        // Verificar cuota de almacenamiento
         $userId = $params['user_id'];
+        $db = Database::get();
+        $stmt = $db->prepare('SELECT storage_used, upload_limit FROM users WHERE id = ?');
+        $stmt->execute(array($userId));
+        $quota = $stmt->fetch();
+
+        if ($quota && (int)$quota['upload_limit'] > 0) {
+            if ((int)$quota['storage_used'] + $file['size'] > (int)$quota['upload_limit']) {
+                http_response_code(413);
+                echo json_encode(array('error' => 'Cuota de almacenamiento excedida. Limite: ' . round((int)$quota['upload_limit'] / 1048576) . ' MB'));
+                return;
+            }
+        }
+
+        // Guardar localmente primero (temporal para extraer metadata)
         $userDir = $this->uploadsDir() . '/' . $userId;
         if (!is_dir($userDir)) mkdir($userDir, 0755, true);
 
         $safeName = time() . '_' . preg_replace('/[^a-zA-Z0-9._-]/', '_', $file['name']);
-        $filePath = $userDir . '/' . $safeName;
-        move_uploaded_file($file['tmp_name'], $filePath);
+        $localPath = $userDir . '/' . $safeName;
+        move_uploaded_file($file['tmp_name'], $localPath);
 
         // Auto-extract metadata from EPUB
         $epubMeta = array();
         if ($ext === 'epub') {
-            $epubMeta = $this->extractEpubMetadata($filePath);
+            $epubMeta = $this->extractEpubMetadata($localPath);
         }
 
         // POST fields override auto-extracted (only if non-empty), fallback to filename
@@ -190,34 +204,96 @@ class BookController
         $totalChapters = (int)(isset($_POST['total_chapters']) ? $_POST['total_chapters'] : 0);
         $cover = isset($_POST['cover_base64']) ? $_POST['cover_base64'] : null;
 
+        // Computar hash del libro para detección
+        $bookHash = StorageManager::computeBookHash($title, $author);
+
+        // Verificar progreso archivado (detección de libro re-subido)
+        $archivedProgress = null;
+        $stmt = $db->prepare('SELECT * FROM progress_archive WHERE user_id = ? AND book_hash = ?');
+        $stmt->execute(array($userId, $bookHash));
+        $archivedProgress = $stmt->fetch();
+
+        // Subir al proveedor de almacenamiento activo
+        $sm = StorageManager::getInstance();
+        $driver = $sm->getDriver();
+        $activeProvider = $sm->getActiveProvider();
+        $remoteName = $userId . '/' . $safeName;
+        $contentType = $ext === 'pdf' ? 'application/pdf' : 'application/epub+zip';
+
+        $storageFileId = null;
+        $storageType = 'local';
+
+        if ($activeProvider === 'local') {
+            // Ya está guardado localmente
+            $storageType = 'local';
+        } else {
+            $result = $driver->upload($localPath, $remoteName, $contentType);
+            if ($result) {
+                $storageType = $activeProvider;
+                $storageFileId = $result['file_id'];
+                // Borrar copia local si no es almacenamiento local
+                @unlink($localPath);
+            } else {
+                // Fallback a local si falla el upload remoto
+                $storageType = 'local';
+            }
+        }
+
         $db = Database::get();
         $stmt = $db->prepare('
-            INSERT INTO books (user_id, title, author, description, file_name, file_path, file_size, file_type, cover_base64, total_chapters)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO books (user_id, title, author, description, file_name, file_path, file_size, file_type, cover_base64, total_chapters, storage_type, storage_file_id, book_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ');
         $stmt->execute(array(
             $userId, $title, $author, $description, $file['name'],
-            $safeName, $file['size'], $ext, $cover, $totalChapters
+            $safeName, $file['size'], $ext, $cover, $totalChapters,
+            $storageType, $storageFileId, $bookHash
         ));
 
         $bookId = (int)$db->lastInsertId();
 
+        // Restaurar progreso archivado si existe
+        if ($archivedProgress) {
+            $stmt = $db->prepare('INSERT OR IGNORE INTO reading_progress (user_id, book_id, current_chapter, current_page, progress_percent, last_read) VALUES (?, ?, ?, ?, ?, ?)');
+            $stmt->execute(array(
+                $userId,
+                $bookId,
+                (int)$archivedProgress['current_chapter'],
+                (int)$archivedProgress['current_page'],
+                (int)$archivedProgress['progress_percent'],
+                $archivedProgress['last_read']
+            ));
+            // Eliminar el archivo del progress_archive
+            $db->prepare('DELETE FROM progress_archive WHERE id = ?')
+                ->execute(array($archivedProgress['id']));
+        }
+
+        // Actualizar storage_used
+        $db->prepare('UPDATE users SET storage_used = storage_used + ? WHERE id = ?')
+            ->execute(array($file['size'], $userId));
+
         http_response_code(201);
-        echo json_encode(array(
+        $response = array(
             'id' => $bookId,
             'title' => $title,
             'author' => $author,
             'file_name' => $file['name'],
             'file_type' => $ext,
             'file_size' => $file['size'],
-        ));
+            'storage_type' => $storageType,
+        );
+        if ($archivedProgress) {
+            $response['progress_restored'] = true;
+            $response['restored_progress_percent'] = (int)$archivedProgress['progress_percent'];
+        }
+        echo json_encode($response);
     }
 
     // GET /api/books/{id}/download
     public function download($params)
     {
         $db = Database::get();
-        $stmt = $db->prepare('SELECT file_path, file_name, file_type FROM books WHERE id = ? AND user_id = ?');
+        $stmt = $db->prepare('SELECT file_path, file_name, file_type, storage_type, storage_file_id FROM books WHERE id = ? AND user_id = ?');
         $stmt->execute(array($params['id'], $params['user_id']));
         $book = $stmt->fetch();
 
@@ -227,18 +303,30 @@ class BookController
             return;
         }
 
-        $fullPath = $this->uploadsDir() . '/' . $params['user_id'] . '/' . $book['file_path'];
-        if (!file_exists($fullPath)) {
-            http_response_code(404);
-            echo json_encode(array('error' => 'Archivo no encontrado en el servidor'));
-            return;
+        $mime = $book['file_type'] === 'pdf' ? 'application/pdf' : 'application/epub+zip';
+        $storageType = isset($book['storage_type']) ? $book['storage_type'] : 'local';
+        $remoteName = $params['user_id'] . '/' . $book['file_path'];
+
+        if ($storageType === 'local') {
+            $fullPath = $this->uploadsDir() . '/' . $remoteName;
+            if (!file_exists($fullPath)) {
+                http_response_code(404);
+                echo json_encode(array('error' => 'Archivo no encontrado en el servidor'));
+                return;
+            }
+            header('Content-Type: ' . $mime);
+            header('Content-Disposition: attachment; filename="' . $book['file_name'] . '"');
+            header('Content-Length: ' . filesize($fullPath));
+            readfile($fullPath);
+            exit;
         }
 
-        $mime = $book['file_type'] === 'pdf' ? 'application/pdf' : 'application/epub+zip';
+        // Descargar desde proveedor remoto (proxy)
+        $sm = StorageManager::getInstance();
+        $driver = $sm->getDriver($storageType);
         header('Content-Type: ' . $mime);
         header('Content-Disposition: attachment; filename="' . $book['file_name'] . '"');
-        header('Content-Length: ' . filesize($fullPath));
-        readfile($fullPath);
+        $driver->download($remoteName, $book['storage_file_id']);
         exit;
     }
 
@@ -246,7 +334,7 @@ class BookController
     public function deleteBook($params)
     {
         $db = Database::get();
-        $stmt = $db->prepare('SELECT file_path FROM books WHERE id = ? AND user_id = ?');
+        $stmt = $db->prepare('SELECT id, file_path, file_size, storage_type, storage_file_id, book_hash FROM books WHERE id = ? AND user_id = ?');
         $stmt->execute(array($params['id'], $params['user_id']));
         $book = $stmt->fetch();
 
@@ -256,13 +344,45 @@ class BookController
             return;
         }
 
-        // Delete file from disk
-        $fullPath = $this->uploadsDir() . '/' . $params['user_id'] . '/' . $book['file_path'];
-        if (file_exists($fullPath)) unlink($fullPath);
+        $fileSize = (int)$book['file_size'];
+        $storageType = isset($book['storage_type']) ? $book['storage_type'] : 'local';
+        $remoteName = $params['user_id'] . '/' . $book['file_path'];
+
+        // Archivar progreso antes de eliminar
+        if (!empty($book['book_hash'])) {
+            $stmt = $db->prepare('SELECT current_chapter, current_page, progress_percent, last_read FROM reading_progress WHERE book_id = ? AND user_id = ?');
+            $stmt->execute(array($book['id'], $params['user_id']));
+            $progress = $stmt->fetch();
+            if ($progress && (int)$progress['progress_percent'] > 0) {
+                $stmt = $db->prepare('INSERT OR REPLACE INTO progress_archive (user_id, book_hash, current_chapter, current_page, progress_percent, last_read) VALUES (?, ?, ?, ?, ?, ?)');
+                $stmt->execute(array(
+                    $params['user_id'],
+                    $book['book_hash'],
+                    (int)$progress['current_chapter'],
+                    (int)$progress['current_page'],
+                    (int)$progress['progress_percent'],
+                    $progress['last_read']
+                ));
+            }
+        }
+
+        // Eliminar archivo del proveedor
+        if ($storageType === 'local') {
+            $fullPath = $this->uploadsDir() . '/' . $remoteName;
+            if (file_exists($fullPath)) unlink($fullPath);
+        } else {
+            $sm = StorageManager::getInstance();
+            $driver = $sm->getDriver($storageType);
+            $driver->delete($remoteName, $book['storage_file_id']);
+        }
 
         // Delete from DB (cascade deletes progress, notes, bookmarks)
         $stmt = $db->prepare('DELETE FROM books WHERE id = ? AND user_id = ?');
         $stmt->execute(array($params['id'], $params['user_id']));
+
+        // Descontar storage_used
+        $db->prepare('UPDATE users SET storage_used = MAX(0, storage_used - ?) WHERE id = ?')
+            ->execute(array($fileSize, $params['user_id']));
 
         echo json_encode(array('ok' => true));
     }

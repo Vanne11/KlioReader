@@ -93,16 +93,40 @@ class UserController
     public function delete($params)
     {
         $db = Database::get();
+        $userId = $params['user_id'];
+
+        // Eliminar archivos de cada proveedor antes del cascade delete
+        $stmt = $db->prepare('SELECT file_path, storage_type, storage_file_id FROM books WHERE user_id = ?');
+        $stmt->execute(array($userId));
+        $books = $stmt->fetchAll();
+
+        $sm = StorageManager::getInstance();
+        foreach ($books as $book) {
+            $storageType = isset($book['storage_type']) ? $book['storage_type'] : 'local';
+            $remoteName = $userId . '/' . $book['file_path'];
+            if ($storageType === 'local') {
+                $fullPath = dirname(__DIR__, 2) . '/uploads/' . $remoteName;
+                if (file_exists($fullPath)) @unlink($fullPath);
+            } else {
+                $driver = $sm->getDriver($storageType);
+                $driver->delete($remoteName, $book['storage_file_id']);
+            }
+        }
+
         // Cascade deletes books, notes, bookmarks, progress
         $stmt = $db->prepare('DELETE FROM users WHERE id = ?');
-        $stmt->execute(array($params['user_id']));
+        $stmt->execute(array($userId));
 
-        // Clean uploaded files
-        $uploadsDir = dirname(__DIR__, 2) . '/uploads/' . $params['user_id'];
+        // Limpiar directorio local del usuario (por si quedan archivos)
+        $uploadsDir = dirname(__DIR__, 2) . '/uploads/' . $userId;
         if (is_dir($uploadsDir)) {
-            array_map('unlink', glob($uploadsDir . '/*'));
-            rmdir($uploadsDir);
+            $files = glob($uploadsDir . '/*');
+            if ($files) array_map('unlink', $files);
+            @rmdir($uploadsDir);
         }
+
+        // Limpiar progress_archive del usuario
+        $db->prepare('DELETE FROM progress_archive WHERE user_id = ?')->execute(array($userId));
 
         echo json_encode(array('ok' => true));
     }

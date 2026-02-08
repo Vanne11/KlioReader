@@ -1,4 +1,7 @@
 RewriteEngine On
-RewriteCond %{REQUEST_FILENAME} !-f
-RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule ^(.*)$ index.php [QSA,L]
+
+# Proteger directorios sensibles
+RewriteRule ^data/ - [F,L]
+RewriteRule ^src/ - [F,L]
+RewriteRule ^migrations/ - [F,L]
+RewriteRule ^\.env$ - [F,L]

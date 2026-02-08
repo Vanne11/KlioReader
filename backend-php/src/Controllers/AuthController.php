@@ -4,6 +4,25 @@ class AuthController
 {
     public function register($params = array())
     {
+        $db = Database::get();
+
+        // Verificar si los registros estan habilitados
+        $stmt = $db->prepare("SELECT value FROM site_settings WHERE key = ?");
+        $stmt->execute(array('registration_enabled'));
+        $row = $stmt->fetch();
+        $registrationEnabled = $row ? $row['value'] : '1';
+
+        if ($registrationEnabled !== '1') {
+            $stmt = $db->prepare("SELECT value FROM site_settings WHERE key = ?");
+            $stmt->execute(array('registration_closed_message'));
+            $msgRow = $stmt->fetch();
+            $message = ($msgRow && $msgRow['value'] !== '') ? $msgRow['value'] : 'Los registros estan cerrados en este momento.';
+
+            http_response_code(403);
+            echo json_encode(array('result' => $message));
+            return;
+        }
+
         $data = json_decode(file_get_contents('php://input'), true);
 
         $username = trim(isset($data['username']) ? $data['username'] : '');
@@ -15,8 +34,6 @@ class AuthController
             echo json_encode(array('error' => 'Username (min 3), email valido y password (min 6) requeridos'));
             return;
         }
-
-        $db = Database::get();
 
         $stmt = $db->prepare('SELECT id FROM users WHERE email = ? OR username = ?');
         $stmt->execute(array($email, $username));
@@ -35,6 +52,7 @@ class AuthController
 
         http_response_code(201);
         echo json_encode(array(
+            'result' => 'ok',
             'token' => $token,
             'user' => array(
                 'id' => $userId,
