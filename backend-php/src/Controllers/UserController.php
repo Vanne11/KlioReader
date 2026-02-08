@@ -1,35 +1,32 @@
 <?php
-namespace KlioReader\Controllers;
-
-use KlioReader\Config\Database;
 
 class UserController
 {
     // GET /api/user/profile
-    public function profile(array $params): void
+    public function profile($params)
     {
         $db = Database::get();
         $stmt = $db->prepare('SELECT id, username, email, avatar, xp, level, streak, last_streak_date, created_at FROM users WHERE id = ?');
-        $stmt->execute([$params['user_id']]);
+        $stmt->execute(array($params['user_id']));
         $user = $stmt->fetch();
 
         if (!$user) {
             http_response_code(404);
-            echo json_encode(['error' => 'Usuario no encontrado']);
+            echo json_encode(array('error' => 'Usuario no encontrado'));
             return;
         }
 
         // Stats
         $stmt = $db->prepare('SELECT COUNT(*) as total_books FROM books WHERE user_id = ?');
-        $stmt->execute([$params['user_id']]);
+        $stmt->execute(array($params['user_id']));
         $bookCount = $stmt->fetch();
 
         $stmt = $db->prepare('SELECT COUNT(*) as total_notes FROM notes WHERE user_id = ?');
-        $stmt->execute([$params['user_id']]);
+        $stmt->execute(array($params['user_id']));
         $noteCount = $stmt->fetch();
 
         $stmt = $db->prepare('SELECT COUNT(*) as total_bookmarks FROM bookmarks WHERE user_id = ?');
-        $stmt->execute([$params['user_id']]);
+        $stmt->execute(array($params['user_id']));
         $bookmarkCount = $stmt->fetch();
 
         $user['total_books'] = (int)$bookCount['total_books'];
@@ -40,13 +37,13 @@ class UserController
     }
 
     // PUT /api/user/profile
-    public function updateProfile(array $params): void
+    public function updateProfile($params)
     {
         $data = json_decode(file_get_contents('php://input'), true);
         $db = Database::get();
 
-        $fields = [];
-        $values = [];
+        $fields = array();
+        $values = array();
 
         if (isset($data['username'])) {
             $fields[] = 'username = ?';
@@ -67,7 +64,7 @@ class UserController
 
         if (empty($fields)) {
             http_response_code(422);
-            echo json_encode(['error' => 'No hay campos para actualizar']);
+            echo json_encode(array('error' => 'No hay campos para actualizar'));
             return;
         }
 
@@ -76,55 +73,55 @@ class UserController
 
         try {
             $db->prepare($sql)->execute($values);
-            echo json_encode(['ok' => true]);
-        } catch (\PDOException $e) {
+            echo json_encode(array('ok' => true));
+        } catch (PDOException $e) {
             http_response_code(409);
-            echo json_encode(['error' => 'El username o email ya está en uso']);
+            echo json_encode(array('error' => 'El username o email ya esta en uso'));
         }
     }
 
     // GET /api/user/stats
-    public function stats(array $params): void
+    public function stats($params)
     {
         $db = Database::get();
         $stmt = $db->prepare('SELECT xp, level, streak, last_streak_date FROM users WHERE id = ?');
-        $stmt->execute([$params['user_id']]);
+        $stmt->execute(array($params['user_id']));
         echo json_encode($stmt->fetch());
     }
 
     // DELETE /api/user/delete
-    public function delete(array $params): void
+    public function delete($params)
     {
         $db = Database::get();
         // Cascade deletes books, notes, bookmarks, progress
         $stmt = $db->prepare('DELETE FROM users WHERE id = ?');
-        $stmt->execute([$params['user_id']]);
+        $stmt->execute(array($params['user_id']));
 
         // Clean uploaded files
         $uploadsDir = dirname(__DIR__, 2) . '/uploads/' . $params['user_id'];
         if (is_dir($uploadsDir)) {
-            array_map('unlink', glob("$uploadsDir/*"));
+            array_map('unlink', glob($uploadsDir . '/*'));
             rmdir($uploadsDir);
         }
 
-        echo json_encode(['ok' => true]);
+        echo json_encode(array('ok' => true));
     }
 
     // PUT /api/user/stats
-    public function updateStats(array $params): void
+    public function updateStats($params)
     {
         $data = json_decode(file_get_contents('php://input'), true);
         $db = Database::get();
 
         $stmt = $db->prepare('UPDATE users SET xp = ?, level = ?, streak = ?, last_streak_date = ? WHERE id = ?');
-        $stmt->execute([
-            (int)($data['xp'] ?? 0),
-            (int)($data['level'] ?? 1),
-            (int)($data['streak'] ?? 0),
-            $data['last_streak_date'] ?? null,
+        $stmt->execute(array(
+            (int)(isset($data['xp']) ? $data['xp'] : 0),
+            (int)(isset($data['level']) ? $data['level'] : 1),
+            (int)(isset($data['streak']) ? $data['streak'] : 0),
+            isset($data['last_streak_date']) ? $data['last_streak_date'] : null,
             $params['user_id'],
-        ]);
+        ));
 
-        echo json_encode(['ok' => true]);
+        echo json_encode(array('ok' => true));
     }
 }

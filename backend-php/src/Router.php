@@ -1,31 +1,30 @@
 <?php
-namespace KlioReader;
 
 class Router
 {
-    private array $routes = [];
+    private $routes = array();
 
-    public function get(string $path, callable|array $handler): void
+    public function get($path, $handler)
     {
         $this->addRoute('GET', $path, $handler);
     }
 
-    public function post(string $path, callable|array $handler): void
+    public function post($path, $handler)
     {
         $this->addRoute('POST', $path, $handler);
     }
 
-    public function put(string $path, callable|array $handler): void
+    public function put($path, $handler)
     {
         $this->addRoute('PUT', $path, $handler);
     }
 
-    public function delete(string $path, callable|array $handler): void
+    public function delete($path, $handler)
     {
         $this->addRoute('DELETE', $path, $handler);
     }
 
-    private function addRoute(string $method, string $path, callable|array $handler): void
+    private function addRoute($method, $path, $handler)
     {
         // Convert {param} to named regex groups
         $pattern = preg_replace('/\{(\w+)\}/', '(?P<$1>[^/]+)', $path);
@@ -33,11 +32,22 @@ class Router
         $this->routes[] = compact('method', 'pattern', 'handler');
     }
 
-    public function resolve(): void
+    public function resolve()
     {
         $method = $_SERVER['REQUEST_METHOD'];
         $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-        $uri = rtrim($uri, '/') ?: '/';
+
+        // Auto-detectar base path para funcionar en cualquier subdirectorio
+        $scriptName = isset($_SERVER['SCRIPT_NAME']) ? $_SERVER['SCRIPT_NAME'] : '';
+        $basePath = rtrim(str_replace('\\', '/', dirname($scriptName)), '/');
+        if ($basePath !== '' && strpos($uri, $basePath) === 0) {
+            $uri = substr($uri, strlen($basePath));
+        }
+
+        $uri = rtrim($uri, '/');
+        if ($uri === '' || $uri === false) {
+            $uri = '/';
+        }
 
         foreach ($this->routes as $route) {
             if ($route['method'] !== $method) continue;
@@ -55,6 +65,6 @@ class Router
         }
 
         http_response_code(404);
-        echo json_encode(['error' => 'Endpoint not found']);
+        echo json_encode(array('error' => 'Endpoint not found'));
     }
 }

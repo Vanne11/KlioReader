@@ -4,8 +4,8 @@ node_modules/
 # Build output
 dist/
 dist-ssr/
-backend-php/public/web/*
-!backend-php/public/web/.gitkeep
+backend-php/web/*
+!backend-php/web/.gitkeep
 
 # Rust / Tauri
 src-tauri/target/
@@ -16,6 +16,8 @@ backend-php/.env
 backend-php/vendor/
 backend-php/uploads/*
 !backend-php/uploads/.gitkeep
+backend-php/data/*
+!backend-php/data/.gitkeep
 backend-php/composer.phar
 
 # Logs
@@ -29,6 +31,9 @@ Thumbs.db
 .vscode/
 .idea/
 *.sw?
+
+# Claude
+.claude/
 
 # Env
 .env

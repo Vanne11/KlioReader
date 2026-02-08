@@ -1,29 +1,26 @@
 <?php
-namespace KlioReader\Middleware;
-
-use KlioReader\Auth\JwtHandler;
 
 class AuthMiddleware
 {
-    public static function wrap(array $handler): \Closure
+    public static function wrap($handler)
     {
-        return function (array $params = []) use ($handler) {
+        return function ($params = array()) use ($handler) {
             $userId = self::authenticate();
             if ($userId === null) {
                 http_response_code(401);
-                echo json_encode(['error' => 'Token inválido o expirado']);
+                echo json_encode(array('error' => 'Token invalido o expirado'));
                 return;
             }
 
             $params['user_id'] = $userId;
             $instance = new $handler[0]();
-            call_user_func([$instance, $handler[1]], $params);
+            call_user_func(array($instance, $handler[1]), $params);
         };
     }
 
-    private static function authenticate(): ?int
+    private static function authenticate()
     {
-        $header = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+        $header = isset($_SERVER['HTTP_AUTHORIZATION']) ? $_SERVER['HTTP_AUTHORIZATION'] : '';
         if (!preg_match('/^Bearer\s+(.+)$/i', $header, $m)) {
             return null;
         }

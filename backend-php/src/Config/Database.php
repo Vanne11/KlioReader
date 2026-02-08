@@ -1,36 +1,35 @@
 <?php
-namespace KlioReader\Config;
-
-use PDO;
-use PDOException;
 
 class Database
 {
-    private static ?PDO $instance = null;
+    private static $instance = null;
 
-    public static function get(): PDO
+    public static function get()
     {
         if (self::$instance === null) {
-            $host = $_ENV['DB_HOST'] ?? 'localhost';
-            $port = $_ENV['DB_PORT'] ?? '3306';
-            $name = $_ENV['DB_NAME'] ?? 'klioreader';
-            $user = $_ENV['DB_USER'] ?? 'root';
-            $pass = $_ENV['DB_PASS'] ?? '';
+            $dbPath = isset($_ENV['DB_PATH']) ? $_ENV['DB_PATH'] : 'data/klioreader.db';
+
+            // Si es ruta relativa, resolver desde la raiz del backend
+            if ($dbPath[0] !== '/') {
+                $dbPath = dirname(__DIR__, 2) . '/' . $dbPath;
+            }
 
             try {
                 self::$instance = new PDO(
-                    "mysql:host={$host};port={$port};dbname={$name};charset=utf8mb4",
-                    $user,
-                    $pass,
-                    [
+                    'sqlite:' . $dbPath,
+                    null,
+                    null,
+                    array(
                         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
                         PDO::ATTR_EMULATE_PREPARES => false,
-                    ]
+                    )
                 );
+                self::$instance->exec('PRAGMA foreign_keys = ON');
+                self::$instance->exec('PRAGMA journal_mode = WAL');
             } catch (PDOException $e) {
                 http_response_code(500);
-                echo json_encode(['error' => 'Database connection failed']);
+                echo json_encode(array('error' => 'Database connection failed'));
                 exit;
             }
         }
