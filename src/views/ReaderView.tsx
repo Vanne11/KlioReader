@@ -178,7 +178,16 @@ export function ReaderView() {
 
       <div className="flex-1 flex overflow-hidden">
         <div ref={readerRef} className="flex-1 overflow-hidden">
-          {usesFoliate ? (
+          {isComic ? (
+            <ComicReader
+              bookPath={currentBook.path}
+              bookType={currentBook.type}
+              theme={readerTheme}
+              initialSection={currentBook.currentChapter}
+              onRelocate={onFoliateRelocate}
+              onReady={onFoliateReady}
+            />
+          ) : usesFoliate ? (
             <FoliateReader
               bookPath={currentBook.path}
               bookType={currentBook.type}
