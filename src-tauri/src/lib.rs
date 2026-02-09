@@ -1,8 +1,14 @@
+mod storage;
+
 use serde::{Serialize, Deserialize};
 use std::path::Path;
+use tauri::Manager;
+use std::sync::Arc;
 use epub::doc::EpubDoc;
 use lopdf::Document;
 use base64::{Engine as _, engine::general_purpose};
+use storage::commands::SyncEngineState;
+use storage::sync_engine::SyncEngine;
 
 #[derive(Serialize, Deserialize, Clone)]
 struct BookMetadata {
@@ -194,16 +200,40 @@ fn save_file_bytes(path: String, bytes: Vec<u8>) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn get_default_library_path() -> Result<String, String> {
-    let mut path = dirs::document_dir()
-        .ok_or_else(|| "No se pudo encontrar la carpeta de documentos".to_string())?;
-    
-    path.push("KlioReader3");
-    
+fn copy_file(src: String, dest: String) -> Result<(), String> {
+    std::fs::copy(&src, &dest)
+        .map(|_| ())
+        .map_err(|e| format!("Error copiando archivo: {}", e))
+}
+
+#[tauri::command]
+fn file_exists(path: String) -> bool {
+    std::path::Path::new(&path).exists()
+}
+
+#[tauri::command]
+fn is_mobile_platform() -> bool {
+    cfg!(target_os = "android") || cfg!(target_os = "ios")
+}
+
+#[tauri::command]
+fn get_default_library_path(app: tauri::AppHandle) -> Result<String, String> {
+    let path = if cfg!(target_os = "android") || cfg!(target_os = "ios") {
+        // En móvil, usar el directorio de datos de la app (no requiere permisos extra)
+        let base = app.path().app_data_dir()
+            .map_err(|e| format!("No se pudo obtener directorio de datos: {}", e))?;
+        base.join("library")
+    } else {
+        let mut p = dirs::document_dir()
+            .ok_or_else(|| "No se pudo encontrar la carpeta de documentos".to_string())?;
+        p.push("KlioReader3");
+        p
+    };
+
     if !path.exists() {
         std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
     }
-    
+
     Ok(path.to_string_lossy().to_string())
 }
 
@@ -212,16 +242,31 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .manage(SyncEngineState(Arc::new(tokio::sync::Mutex::new(SyncEngine::new()))))
         .invoke_handler(tauri::generate_handler![
-            greet, 
-            get_metadata, 
-            read_epub_chapter, 
-            scan_directory, 
+            greet,
+            get_metadata,
+            read_epub_chapter,
+            scan_directory,
             get_random_snippet,
+            is_mobile_platform,
             get_default_library_path,
             read_epub_resource,
             read_file_bytes,
-            save_file_bytes
+            save_file_bytes,
+            copy_file,
+            file_exists,
+            storage::commands::user_storage_test_connection,
+            storage::commands::user_storage_configure,
+            storage::commands::user_storage_sync_now,
+            storage::commands::user_storage_start_auto_sync,
+            storage::commands::user_storage_stop_auto_sync,
+            storage::commands::user_storage_set_auto_sync_interval,
+            storage::commands::user_storage_get_status,
+            storage::commands::user_storage_list_remote,
+            storage::commands::user_storage_update_progress,
+            storage::commands::user_storage_get_progress,
+            storage::commands::gdrive_start_auth
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

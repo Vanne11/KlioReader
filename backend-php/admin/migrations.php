@@ -316,10 +316,10 @@ $pageTitle = 'Migraciones';
 require_once __DIR__ . '/../templates/admin-layout.php';
 ?>
 
-<h1 class="text-2xl font-bold mb-6">Migraciones</h1>
+<h1 class="text-xl md:text-2xl font-bold mb-6">Migraciones</h1>
 
 <!-- Stats -->
-<div class="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-8">
+<div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
     <div class="stat-card">
         <div class="text-klio-muted text-xs font-medium uppercase tracking-wider">Pendientes</div>
         <div class="text-2xl font-bold mt-1 <?php echo $countPending > 0 ? ($countFailed > 0 ? 'text-red-400' : 'text-yellow-400') : 'text-green-400'; ?>"><?php echo $countPending; ?><?php if ($countFailed > 0): ?><span class="text-sm text-red-400 ml-1">(<?php echo $countFailed; ?> con error)</span><?php endif; ?></div>
@@ -339,7 +339,7 @@ require_once __DIR__ . '/../templates/admin-layout.php';
 </div>
 
 <!-- Migraciones pendientes -->
-<div class="bg-klio-card border border-klio-border rounded-xl overflow-hidden mb-6">
+<div class="bg-klio-card border border-klio-border rounded-xl overflow-x-auto mb-6">
     <div class="px-5 py-4 border-b border-klio-border">
         <h2 class="font-semibold text-sm">Migraciones Pendientes</h2>
     </div>
@@ -382,7 +382,7 @@ require_once __DIR__ . '/../templates/admin-layout.php';
                         </div>
                         <?php endif; ?>
                     </td>
-                    <td class="text-right">
+                    <td class="text-right whitespace-nowrap">
                         <form method="POST" class="inline-flex gap-2" onsubmit="return confirm('<?php echo $pf['last_error'] ? 'Reintentar' : 'Ejecutar'; ?> migracion <?php echo e($pf['filename']); ?>? Se creara un backup automatico.');">
                             <?php echo csrf_field(); ?>
                             <input type="hidden" name="action" value="run_migration">
@@ -409,7 +409,7 @@ require_once __DIR__ . '/../templates/admin-layout.php';
 </div>
 
 <!-- Historial de migraciones -->
-<div class="bg-klio-card border border-klio-border rounded-xl overflow-hidden mb-6">
+<div class="bg-klio-card border border-klio-border rounded-xl overflow-x-auto mb-6">
     <div class="px-5 py-4 border-b border-klio-border">
         <h2 class="font-semibold text-sm">Historial</h2>
     </div>
@@ -446,7 +446,7 @@ require_once __DIR__ . '/../templates/admin-layout.php';
 </div>
 
 <!-- Backups -->
-<div class="bg-klio-card border border-klio-border rounded-xl overflow-hidden">
+<div class="bg-klio-card border border-klio-border rounded-xl overflow-x-auto">
     <div class="px-5 py-4 border-b border-klio-border">
         <h2 class="font-semibold text-sm">Backups</h2>
     </div>
@@ -468,7 +468,7 @@ require_once __DIR__ . '/../templates/admin-layout.php';
                 <td><span class="font-mono text-xs"><?php echo e($bf['name']); ?></span></td>
                 <td class="text-klio-muted text-xs"><?php echo format_bytes($bf['size']); ?></td>
                 <td class="text-klio-muted text-xs"><?php echo e($bf['date']); ?></td>
-                <td class="text-right">
+                <td class="text-right whitespace-nowrap">
                     <form method="POST" class="inline-flex">
                         <?php echo csrf_field(); ?>
                         <input type="hidden" name="action" value="download_backup">
@@ -498,7 +498,7 @@ require_once __DIR__ . '/../templates/admin-layout.php';
 
 <!-- Historial de restauraciones -->
 <?php if ($countRestores > 0): ?>
-<div class="bg-klio-card border border-klio-border rounded-xl overflow-hidden mt-6">
+<div class="bg-klio-card border border-klio-border rounded-xl overflow-x-auto mt-6">
     <div class="px-5 py-4 border-b border-klio-border">
         <h2 class="font-semibold text-sm">Historial de Restauraciones</h2>
     </div>

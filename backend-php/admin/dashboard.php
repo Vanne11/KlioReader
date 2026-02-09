@@ -23,7 +23,7 @@ $pageTitle = 'Dashboard';
 require_once __DIR__ . '/../templates/admin-layout.php';
 ?>
 
-<h1 class="text-2xl font-bold mb-6">Dashboard</h1>
+<h1 class="text-xl md:text-2xl font-bold mb-6">Dashboard</h1>
 
 <!-- Stats Grid -->
 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
@@ -49,7 +49,7 @@ require_once __DIR__ . '/../templates/admin-layout.php';
 <!-- Tables -->
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
     <!-- Ultimos usuarios -->
-    <div class="bg-klio-card border border-klio-border rounded-xl overflow-hidden">
+    <div class="bg-klio-card border border-klio-border rounded-xl overflow-x-auto">
         <div class="px-5 py-4 border-b border-klio-border flex justify-between items-center">
             <h2 class="font-semibold text-sm">Ultimos Usuarios</h2>
             <a href="<?php echo base_url('admin/users.php'); ?>" class="text-klio-primary text-xs hover:underline">Ver todos</a>
@@ -85,7 +85,7 @@ require_once __DIR__ . '/../templates/admin-layout.php';
     </div>
 
     <!-- Ultimos libros -->
-    <div class="bg-klio-card border border-klio-border rounded-xl overflow-hidden">
+    <div class="bg-klio-card border border-klio-border rounded-xl overflow-x-auto">
         <div class="px-5 py-4 border-b border-klio-border">
             <h2 class="font-semibold text-sm">Ultimos Libros</h2>
         </div>

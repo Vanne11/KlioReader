@@ -79,25 +79,27 @@ $pageTitle = 'Usuarios';
 require_once __DIR__ . '/../templates/admin-layout.php';
 ?>
 
-<div class="flex items-center justify-between mb-6">
-    <h1 class="text-2xl font-bold">Usuarios</h1>
-    <button onclick="document.getElementById('createModal').classList.remove('hidden')" class="btn-primary">+ Nuevo Usuario</button>
+<div class="flex items-center justify-between mb-6 gap-3">
+    <h1 class="text-xl md:text-2xl font-bold">Usuarios</h1>
+    <button onclick="document.getElementById('createModal').classList.remove('hidden')" class="btn-primary whitespace-nowrap text-xs md:text-sm">+ Nuevo</button>
 </div>
 
 <!-- Busqueda -->
 <form method="GET" class="mb-6">
-    <div class="flex gap-3">
+    <div class="flex flex-col sm:flex-row gap-3">
         <input type="text" name="q" placeholder="Buscar por username o email..." value="<?php echo e($search); ?>"
-            class="form-input flex-1 max-w-md">
-        <button type="submit" class="btn-secondary">Buscar</button>
-        <?php if ($search): ?>
-        <a href="<?php echo base_url('admin/users.php'); ?>" class="btn-secondary">Limpiar</a>
-        <?php endif; ?>
+            class="form-input flex-1 sm:max-w-md">
+        <div class="flex gap-2">
+            <button type="submit" class="btn-secondary">Buscar</button>
+            <?php if ($search): ?>
+            <a href="<?php echo base_url('admin/users.php'); ?>" class="btn-secondary">Limpiar</a>
+            <?php endif; ?>
+        </div>
     </div>
 </form>
 
 <!-- Tabla -->
-<div class="bg-klio-card border border-klio-border rounded-xl overflow-hidden">
+<div class="bg-klio-card border border-klio-border rounded-xl overflow-x-auto">
     <table class="admin-table">
         <thead>
             <tr>
@@ -214,7 +216,6 @@ require_once __DIR__ . '/../templates/admin-layout.php';
     </div>
 </div>
 
-<script src="<?php echo base_url('assets/js/admin.js'); ?>"></script>
     </main>
 </div>
 </body>

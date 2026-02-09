@@ -113,6 +113,13 @@ if (empty($errors)) {
             $checks[] = array('Migración 003 (dedup)', 'Aplicada', true);
         }
 
+        // Migración 006: Compartir libros entre usuarios
+        $migration006 = __DIR__ . '/migrations/006_book_shares.sql';
+        if (file_exists($migration006)) {
+            $pdo->exec(file_get_contents($migration006));
+            $checks[] = array('Migración 006 (shares)', 'Aplicada', true);
+        }
+
         // Migración 004: selected_title_id en users
         $migration004 = __DIR__ . '/migrations/004_add_selected_title.sql';
         if (file_exists($migration004)) {

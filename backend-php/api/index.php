@@ -6,6 +6,7 @@ require_once __DIR__ . '/../src/Middleware/AuthMiddleware.php';
 require_once __DIR__ . '/../src/Controllers/AuthController.php';
 require_once __DIR__ . '/../src/Controllers/BookController.php';
 require_once __DIR__ . '/../src/Controllers/UserController.php';
+require_once __DIR__ . '/../src/Controllers/ShareController.php';
 require_once __DIR__ . '/../src/Storage/StorageDriver.php';
 require_once __DIR__ . '/../src/Storage/LocalDriver.php';
 require_once __DIR__ . '/../src/Storage/B2Driver.php';
@@ -81,5 +82,14 @@ $router->delete('/notes/{id}', AuthMiddleware::wrap(array('BookController', 'del
 $router->get('/books/{id}/bookmarks', AuthMiddleware::wrap(array('BookController', 'getBookmarks')));
 $router->post('/books/{id}/bookmarks', AuthMiddleware::wrap(array('BookController', 'addBookmark')));
 $router->delete('/bookmarks/{id}', AuthMiddleware::wrap(array('BookController', 'deleteBookmark')));
+
+// -- Compartir libros (protegido) --
+$router->get('/users/search', AuthMiddleware::wrap(array('ShareController', 'searchUsers')));
+$router->post('/books/{id}/share', AuthMiddleware::wrap(array('ShareController', 'shareBook')));
+$router->get('/shares/pending', AuthMiddleware::wrap(array('ShareController', 'pendingShares')));
+$router->get('/shares/pending/count', AuthMiddleware::wrap(array('ShareController', 'pendingCount')));
+$router->post('/shares/{id}/accept', AuthMiddleware::wrap(array('ShareController', 'acceptShare')));
+$router->post('/shares/{id}/reject', AuthMiddleware::wrap(array('ShareController', 'rejectShare')));
+$router->get('/books/{id}/shared-progress', AuthMiddleware::wrap(array('ShareController', 'sharedProgress')));
 
 $router->resolve();

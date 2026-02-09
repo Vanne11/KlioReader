@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   BookOpen, Trophy, Library, Flame, X,
@@ -9,7 +10,8 @@ import {
   Cloud, CloudUpload, CloudDownload, LogIn, LogOut, User, Loader2, Server, Trash2, Pencil, FolderOpen,
   Play, ChevronLeft, AlertTriangle, CheckCircle2, Info,
   StickyNote, Bookmark as BookmarkIcon, Plus, MessageSquare,
-  Key, Brain, Eye
+  Key, Brain, Eye, HardDrive, RefreshCw, Wifi, WifiOff, Check, Crown,
+  Share2, Bell, Send, Search, Users, ChevronDown, ChevronUp
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -33,6 +35,13 @@ import * as syncQueue from "@/lib/syncQueue";
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 /** Converts a cover value to a valid image src, handling both raw base64 and full data URIs */
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  return (bytes / Math.pow(1024, i)).toFixed(i > 1 ? 1 : 0) + ' ' + units[i];
+}
+
 function coverSrc(cover: string | null | undefined): string | undefined {
   if (!cover) return undefined;
   return cover.startsWith('data:') ? cover : `data:image/png;base64,${cover}`;
@@ -61,7 +70,96 @@ type LibraryView = 'grid-large' | 'grid-mini' | 'grid-card' | 'list-info';
 type ReaderTheme = 'dark' | 'sepia' | 'light';
 type ReadView = 'scroll' | 'paginated';
 type ReaderFont = 'Libre Baskerville' | 'Inter' | 'Merriweather' | 'Literata' | 'OpenDyslexic';
-type SettingsTab = 'display' | 'llm' | 'folder';
+type SettingsTab = 'display' | 'llm' | 'folder' | 'storage';
+type UserStorageProvider = 's3' | 'webdav' | 'gdrive';
+
+interface UserStorageConfig {
+  provider: UserStorageProvider;
+  // S3
+  s3_endpoint?: string;
+  s3_region?: string;
+  s3_bucket?: string;
+  s3_access_key?: string;
+  s3_secret_key?: string;
+  // WebDAV
+  webdav_url?: string;
+  webdav_username?: string;
+  webdav_password?: string;
+  // Google Drive
+  gdrive_client_id?: string;
+  gdrive_client_secret?: string;
+  gdrive_access_token?: string;
+  gdrive_refresh_token?: string;
+  // Common
+  path_prefix?: string;
+  auto_sync_enabled?: boolean;
+  auto_sync_interval?: number; // seconds
+}
+
+interface SyncStatus {
+  syncing: boolean;
+  last_sync: string | null;
+  pending_up: number;
+  pending_down: number;
+  error: string | null;
+  auto_sync_enabled: boolean;
+  auto_sync_interval_secs: number;
+}
+
+const DEFAULT_STORAGE_CONFIG: UserStorageConfig = {
+  provider: 's3',
+  s3_endpoint: '',
+  s3_region: 'us-east-1',
+  s3_bucket: '',
+  s3_access_key: '',
+  s3_secret_key: '',
+  webdav_url: '',
+  webdav_username: '',
+  webdav_password: '',
+  gdrive_client_id: '',
+  gdrive_client_secret: '',
+  path_prefix: 'klioreader/',
+  auto_sync_enabled: false,
+  auto_sync_interval: 300,
+};
+
+function loadStorageConfig(): UserStorageConfig {
+  try {
+    const raw = localStorage.getItem('klioUserStorage');
+    return raw ? { ...DEFAULT_STORAGE_CONFIG, ...JSON.parse(raw) } : DEFAULT_STORAGE_CONFIG;
+  } catch { return DEFAULT_STORAGE_CONFIG; }
+}
+
+function saveStorageConfig(config: UserStorageConfig) {
+  localStorage.setItem('klioUserStorage', JSON.stringify(config));
+}
+
+function buildInvokeConfig(config: UserStorageConfig): { provider: string; [key: string]: string } {
+  const base: any = { provider: config.provider };
+  switch (config.provider) {
+    case 's3':
+      base.endpoint = config.s3_endpoint || '';
+      base.region = config.s3_region || 'us-east-1';
+      base.bucket = config.s3_bucket || '';
+      base.access_key = config.s3_access_key || '';
+      base.secret_key = config.s3_secret_key || '';
+      base.path_prefix = config.path_prefix || 'klioreader/';
+      break;
+    case 'webdav':
+      base.url = config.webdav_url || '';
+      base.username = config.webdav_username || '';
+      base.password = config.webdav_password || '';
+      base.path_prefix = config.path_prefix || '/klioreader/';
+      break;
+    case 'gdrive':
+      base.client_id = config.gdrive_client_id || '';
+      base.client_secret = config.gdrive_client_secret || '';
+      if (config.gdrive_access_token) base.access_token = config.gdrive_access_token;
+      if (config.gdrive_refresh_token) base.refresh_token = config.gdrive_refresh_token;
+      break;
+  }
+  return base;
+}
 type LlmProvider = 'groq' | 'google' | 'anthropic' | 'openai' | 'ollama' | 'custom';
 
 const EpubImage = ({ src, bookPath }: { src: string, bookPath: string }) => {
@@ -93,6 +191,7 @@ function App() {
   const [selectedBook, setSelectedBook] = useState<Book | null>(null);
   const [epubContent, setEpubContent] = useState<string>("");
   const [libraryPath, setLibraryPath] = useState<string | null>(localStorage.getItem("libraryPath"));
+  const [isMobile, setIsMobile] = useState(false);
   
   // CONFIGURACIONES PERSISTENTES
   const [libraryView, setLibraryView] = useState<LibraryView>(() => (localStorage.getItem("libraryView") as LibraryView) || "grid-large");
@@ -134,10 +233,41 @@ function App() {
   const [selectedTitleId, setSelectedTitleId] = useState<string | null>(() => localStorage.getItem('klioSelectedTitle'));
   const [selectedBadgeDetail, setSelectedBadgeDetail] = useState<BadgeWithStatus | null>(null);
 
+  // Shares
+  const [pendingSharesCount, setPendingSharesCount] = useState(0);
+  const [pendingShares, setPendingShares] = useState<api.BookShare[]>([]);
+  const [showInvitations, setShowInvitations] = useState(true);
+  const [sharingBook, setSharingBook] = useState<api.CloudBook | null>(null);
+  const [shareSearchQuery, setShareSearchQuery] = useState('');
+  const [shareSearchResults, setShareSearchResults] = useState<api.SearchUser[]>([]);
+  const [shareSearching, setShareSearching] = useState(false);
+  const [shareMessage, setShareMessage] = useState('');
+  const [shareSending, setShareSending] = useState<number | null>(null);
+  const [sharedProgressMap, setSharedProgressMap] = useState<Record<number, api.SharedUserProgress[]>>({});
+  const [expandedShareProgress, setExpandedShareProgress] = useState<number | null>(null);
+  const shareSearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Settings
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('display');
   const [llmProvider, setLlmProvider] = useState<LlmProvider>(() => (localStorage.getItem('klioLlmProvider') as LlmProvider) || 'groq');
   const [llmApiKey, setLlmApiKey] = useState<string>(() => localStorage.getItem('klioLlmApiKey') || '');
+
+  // User Storage
+  const [storageConfig, setStorageConfig] = useState<UserStorageConfig>(loadStorageConfig);
+  const [storageTesting, setStorageTesting] = useState(false);
+  const [storageTestResult, setStorageTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>({ syncing: false, last_sync: null, pending_up: 0, pending_down: 0, error: null, auto_sync_enabled: false, auto_sync_interval_secs: 300 });
+  const [syncingManual, setSyncingManual] = useState(false);
+  const [gdriveAuthLoading, setGdriveAuthLoading] = useState(false);
+  const storageConfigured = (() => {
+    const c = storageConfig;
+    switch (c.provider) {
+      case 's3': return !!(c.s3_bucket && c.s3_access_key && c.s3_secret_key);
+      case 'webdav': return !!(c.webdav_url && c.webdav_username && c.webdav_password);
+      case 'gdrive': return !!(c.gdrive_client_id && c.gdrive_refresh_token);
+      default: return false;
+    }
+  })();
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [numPages, setNumPages] = useState<number | null>(null);
@@ -288,6 +418,12 @@ function App() {
   useEffect(() => {
     if (!booksLoaded) return;
     async function init() {
+      // Detectar si estamos en móvil (Android/iOS)
+      try {
+        const mobile: boolean = await invoke("is_mobile_platform");
+        setIsMobile(mobile);
+      } catch { /* desktop fallback */ }
+
       let path = libraryPath;
       if (!path) {
         try {
@@ -406,6 +542,9 @@ function App() {
     setAuthUser(null);
     setCloudBooks([]);
     setCloudBooksReady(false);
+    setPendingSharesCount(0);
+    setPendingShares([]);
+    setSharedProgressMap({});
   }
 
   function showAlert(type: 'error' | 'success' | 'info', title: string, message: string) {
@@ -474,19 +613,45 @@ function App() {
 
   async function downloadBookFromCloud(cloudBook: api.CloudBook) {
     if (!libraryPath) {
-      showAlert('info', 'Sin carpeta de biblioteca', 'Configura una carpeta de biblioteca local primero');
+      showAlert('info', 'Sin carpeta de biblioteca', 'Configura una carpeta de biblioteca en Configuración → Carpeta de Libros');
+      setActiveTab('settings');
+      setSettingsTab('folder');
       return;
     }
     if (downloadingBookId) return;
     setDownloadingBookId(cloudBook.id);
     try {
-      const blob = await api.downloadBook(cloudBook.id);
-      const arrayBuffer = await blob.arrayBuffer();
-      const bytes = Array.from(new Uint8Array(arrayBuffer));
       const savePath = `${libraryPath}/${cloudBook.file_name}`;
-      await invoke("save_file_bytes", { path: savePath, bytes });
+
+      // Si es duplicado, buscar si ya tenemos una copia local de otro libro con el mismo archivo
+      let copiedLocally = false;
+      if (cloudBook.stored_file_id != null) {
+        const sibling = cloudBooks.find(
+          cb => cb.id !== cloudBook.id && cb.stored_file_id === cloudBook.stored_file_id
+        );
+        if (sibling) {
+          const siblingPath = `${libraryPath}/${sibling.file_name}`;
+          const siblingExists: boolean = await invoke("file_exists", { path: siblingPath });
+          if (siblingExists) {
+            await invoke("copy_file", { src: siblingPath, dest: savePath });
+            copiedLocally = true;
+          }
+        }
+      }
+
+      if (!copiedLocally) {
+        const blob = await api.downloadBook(cloudBook.id);
+        const arrayBuffer = await blob.arrayBuffer();
+        const bytes = Array.from(new Uint8Array(arrayBuffer));
+        await invoke("save_file_bytes", { path: savePath, bytes });
+      }
+
       scanLibrary(libraryPath);
-      showAlert('success', 'Libro descargado', `"${cloudBook.title}" se guardó en tu biblioteca local`);
+      showAlert('success', copiedLocally ? 'Libro copiado (duplicado)' : 'Libro descargado',
+        copiedLocally
+          ? `"${cloudBook.title}" se copió desde un archivo local idéntico`
+          : `"${cloudBook.title}" se guardó en tu biblioteca local`
+      );
     } catch (err: any) {
       showAlert('error', 'Error al descargar', err.message || 'No se pudo descargar el libro');
     } finally {
@@ -536,14 +701,14 @@ function App() {
   }
 
   // ── Profile ──
-  async function loadProfile() {
+  async function loadProfile(openModal = true) {
     try {
       const p = await api.getProfile();
       setProfile(p);
       setProfileForm({ username: p.username, email: p.email, password: '' });
-      setShowProfile(true);
+      if (openModal) setShowProfile(true);
     } catch (err: any) {
-      showAlert('error', 'Error', err.message || 'No se pudo cargar el perfil');
+      if (openModal) showAlert('error', 'Error', err.message || 'No se pudo cargar el perfil');
     }
   }
 
@@ -573,6 +738,9 @@ function App() {
       api.clearAuth();
       setAuthUser(null);
       setCloudBooks([]);
+      setPendingSharesCount(0);
+      setPendingShares([]);
+      setSharedProgressMap({});
       setShowDeleteConfirm(false);
       showAlert('success', 'Cuenta eliminada', 'Tu cuenta y todos tus datos fueron eliminados permanentemente');
     } catch (err: any) {
@@ -671,8 +839,102 @@ function App() {
   }
 
   useEffect(() => {
-    if (authUser) loadCloudBooks();
+    if (authUser) {
+      loadCloudBooks();
+      loadPendingSharesCount();
+    }
   }, [authUser]);
+
+  // ── Share functions ──
+  async function loadPendingSharesCount() {
+    if (!api.isLoggedIn()) return;
+    try {
+      const count = await api.getPendingSharesCount();
+      setPendingSharesCount(count);
+    } catch {}
+  }
+
+  async function loadPendingShares() {
+    if (!api.isLoggedIn()) return;
+    try {
+      const shares = await api.getPendingShares();
+      setPendingShares(shares);
+      setPendingSharesCount(shares.length);
+    } catch {}
+  }
+
+  async function handleAcceptShare(shareId: number) {
+    try {
+      await api.acceptShare(shareId);
+      setPendingShares(prev => prev.filter(s => s.id !== shareId));
+      setPendingSharesCount(prev => Math.max(0, prev - 1));
+      loadCloudBooks();
+      showAlert('success', 'Libro aceptado', 'El libro se agregó a tu biblioteca');
+    } catch (err: any) {
+      showAlert('error', 'Error', err.message || 'No se pudo aceptar la invitación');
+    }
+  }
+
+  async function handleRejectShare(shareId: number) {
+    try {
+      await api.rejectShare(shareId);
+      setPendingShares(prev => prev.filter(s => s.id !== shareId));
+      setPendingSharesCount(prev => Math.max(0, prev - 1));
+    } catch (err: any) {
+      showAlert('error', 'Error', err.message || 'No se pudo rechazar la invitación');
+    }
+  }
+
+  function handleShareSearch(query: string) {
+    setShareSearchQuery(query);
+    if (shareSearchTimeoutRef.current) clearTimeout(shareSearchTimeoutRef.current);
+    if (query.length < 2) { setShareSearchResults([]); return; }
+    shareSearchTimeoutRef.current = setTimeout(async () => {
+      setShareSearching(true);
+      try {
+        const results = await api.searchUsers(query);
+        setShareSearchResults(results);
+      } catch {}
+      setShareSearching(false);
+    }, 300);
+  }
+
+  async function handleSendShare(toUserId: number) {
+    if (!sharingBook) return;
+    setShareSending(toUserId);
+    try {
+      await api.shareBook(sharingBook.id, toUserId, shareMessage || undefined);
+      showAlert('success', 'Libro compartido', `Se envió la invitación correctamente`);
+      setShareSearchResults(prev => prev.filter(u => u.id !== toUserId));
+      loadCloudBooks();
+    } catch (err: any) {
+      showAlert('error', 'Error al compartir', err.message || 'No se pudo enviar la invitación');
+    }
+    setShareSending(null);
+  }
+
+  function openShareDialog(cb: api.CloudBook) {
+    setSharingBook(cb);
+    setShareSearchQuery('');
+    setShareSearchResults([]);
+    setShareMessage('');
+  }
+
+  async function loadSharedProgress(bookId: number) {
+    try {
+      const progress = await api.getSharedProgress(bookId);
+      setSharedProgressMap(prev => ({ ...prev, [bookId]: progress }));
+    } catch {}
+  }
+
+  function toggleShareProgress(bookId: number) {
+    if (expandedShareProgress === bookId) {
+      setExpandedShareProgress(null);
+    } else {
+      setExpandedShareProgress(bookId);
+      if (!sharedProgressMap[bookId]) loadSharedProgress(bookId);
+    }
+  }
 
   async function readBook(book: Book) {
     setSelectedBook(null);
@@ -749,6 +1011,17 @@ function App() {
         progress_percent: newProgress,
       });
     }
+
+    // Sync progress to user storage if configured
+    if (storageConfigured) {
+      const filename = currentBook.path.split('/').pop() || '';
+      invoke('user_storage_update_progress', {
+        filename,
+        chapter: newIndex,
+        page: currentPageInChapter,
+        percent: newProgress,
+      }).catch(() => {}); // fire-and-forget
+    }
   }
 
   const themeClasses = {
@@ -777,6 +1050,145 @@ function App() {
       }
     },
   };
+
+  // ── User Storage functions ──
+  const handleStorageConfigChange = (patch: Partial<UserStorageConfig>) => {
+    const next = { ...storageConfig, ...patch };
+    setStorageConfig(next);
+    saveStorageConfig(next);
+    setStorageTestResult(null);
+  };
+
+  const handleTestConnection = async () => {
+    setStorageTesting(true);
+    setStorageTestResult(null);
+    try {
+      const cfg = buildInvokeConfig(storageConfig);
+      await invoke('user_storage_test_connection', { config: cfg });
+      setStorageTestResult({ ok: true, msg: 'Conexión exitosa' });
+    } catch (e: any) {
+      setStorageTestResult({ ok: false, msg: e?.message || String(e) });
+    } finally {
+      setStorageTesting(false);
+    }
+  };
+
+  const handleConfigureAndSync = async () => {
+    if (!libraryPath) {
+      showAlert('info', 'Sin carpeta', 'Configura primero una carpeta de biblioteca');
+      return;
+    }
+    try {
+      const cfg = buildInvokeConfig(storageConfig);
+      await invoke('user_storage_configure', { config: cfg, libraryPath });
+    } catch (e: any) {
+      showAlert('error', 'Error configurando storage', e?.message || String(e));
+    }
+  };
+
+  const handleSyncNow = async () => {
+    setSyncingManual(true);
+    try {
+      await handleConfigureAndSync();
+      const report: any = await invoke('user_storage_sync_now');
+      const total = (report.uploaded?.length || 0) + (report.downloaded?.length || 0);
+      const errors = report.errors?.length || 0;
+      if (errors > 0) {
+        showAlert('error', 'Sync con errores', `${total} archivos sincronizados, ${errors} error(es): ${report.errors.join(', ')}`);
+      } else if (total > 0) {
+        showAlert('success', 'Sincronización completa', `${report.uploaded?.length || 0} subidos, ${report.downloaded?.length || 0} descargados`);
+      } else {
+        showAlert('success', 'Todo sincronizado', 'No hay cambios pendientes');
+      }
+      // Refresh sync status
+      const status: SyncStatus = await invoke('user_storage_get_status');
+      setSyncStatus(status);
+      // Reload library if files were downloaded
+      if (report.downloaded?.length > 0 && libraryPath) {
+        scanLibrary(libraryPath);
+      }
+    } catch (e: any) {
+      showAlert('error', 'Error de sync', e?.message || String(e));
+    } finally {
+      setSyncingManual(false);
+    }
+  };
+
+  const handleToggleAutoSync = async () => {
+    const newEnabled = !storageConfig.auto_sync_enabled;
+    handleStorageConfigChange({ auto_sync_enabled: newEnabled });
+    try {
+      if (newEnabled) {
+        await handleConfigureAndSync();
+        await invoke('user_storage_set_auto_sync_interval', { secs: storageConfig.auto_sync_interval || 300 });
+        await invoke('user_storage_start_auto_sync');
+      } else {
+        await invoke('user_storage_stop_auto_sync');
+      }
+      const status: SyncStatus = await invoke('user_storage_get_status');
+      setSyncStatus(status);
+    } catch (e: any) {
+      showAlert('error', 'Error auto-sync', e?.message || String(e));
+    }
+  };
+
+  const handleGDriveAuth = async () => {
+    setGdriveAuthLoading(true);
+    try {
+      const result: { access_token: string; refresh_token: string | null } = await invoke('gdrive_start_auth', {
+        clientId: storageConfig.gdrive_client_id || '',
+        clientSecret: storageConfig.gdrive_client_secret || '',
+      });
+      handleStorageConfigChange({
+        gdrive_access_token: result.access_token,
+        gdrive_refresh_token: result.refresh_token || undefined,
+      });
+      setStorageTestResult({ ok: true, msg: 'Google Drive conectado' });
+    } catch (e: any) {
+      setStorageTestResult({ ok: false, msg: e?.message || String(e) });
+    } finally {
+      setGdriveAuthLoading(false);
+    }
+  };
+
+  const handleAutoSyncIntervalChange = async (secs: number) => {
+    handleStorageConfigChange({ auto_sync_interval: secs });
+    try {
+      await invoke('user_storage_set_auto_sync_interval', { secs });
+    } catch { /* ignore */ }
+  };
+
+  // Listen for sync events
+  useEffect(() => {
+    const unlisten1 = listen('sync-progress', () => {
+      setSyncStatus(prev => ({ ...prev, syncing: true }));
+    });
+    const unlisten2 = listen('sync-complete', (event: any) => {
+      setSyncStatus(prev => ({ ...prev, syncing: false, last_sync: new Date().toISOString() }));
+      // Reload books if downloads happened
+      if (event.payload?.downloaded?.length > 0 && libraryPath) {
+        scanLibrary(libraryPath);
+      }
+    });
+    return () => { unlisten1.then(f => f()); unlisten2.then(f => f()); };
+  }, [libraryPath]);
+
+  // Load profile silently on mount if logged in (for storage quota data)
+  useEffect(() => {
+    if (authUser) loadProfile(false);
+  }, [authUser]);
+
+  // Initialize storage on mount if configured
+  useEffect(() => {
+    if (storageConfigured && libraryPath) {
+      handleConfigureAndSync();
+      if (storageConfig.auto_sync_enabled) {
+        invoke('user_storage_set_auto_sync_interval', { secs: storageConfig.auto_sync_interval || 300 })
+          .then(() => invoke('user_storage_start_auto_sync'))
+          .catch(() => {});
+      }
+    }
+  }, []);
 
   const renderContent = () => {
     if (currentBook) {
@@ -1114,21 +1526,64 @@ function App() {
           <div className="p-6"><h1 className="text-2xl font-bold text-primary flex items-center gap-2 italic"><BookOpen className="w-7 h-7" /> KlioReader</h1></div>
           <nav className="flex-1 px-4 space-y-1">
             <Button variant={activeTab === "library" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => setActiveTab("library")}><Library className="w-5 h-5 text-primary" /> Biblioteca</Button>
-            <Button variant={activeTab === "cloud" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => setActiveTab("cloud")}><Cloud className="w-5 h-5 text-blue-400" /> Nube</Button>
+            <Button variant={activeTab === "cloud" ? "secondary" : "ghost"} className="w-full justify-start gap-3 relative" onClick={() => { setActiveTab("cloud"); if (pendingSharesCount > 0) loadPendingShares(); }}>
+              <Cloud className="w-5 h-5 text-blue-400" /> Nube
+              {pendingSharesCount > 0 && <span className="absolute right-2 top-1/2 -translate-y-1/2 bg-red-500 text-white text-[9px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">{pendingSharesCount}</span>}
+            </Button>
             <Button variant={activeTab === "gamification" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => setActiveTab("gamification")}><Trophy className="w-5 h-5 text-yellow-500" /> Mi Progreso</Button>
             <Button variant={activeTab === "settings" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => setActiveTab("settings")}><Settings2 className="w-5 h-5 text-zinc-400" /> Configuración</Button>
           </nav>
           <div className="p-6 mt-auto border-t border-white/5">
             {authUser ? (
               <div className="space-y-2">
-                <div className="flex items-center gap-2 cursor-pointer hover:opacity-80" onClick={loadProfile}>
+                <div className="flex items-center gap-2 cursor-pointer hover:opacity-80" onClick={() => loadProfile()}>
                   <User className="w-4 h-4 text-primary" />
                   <span className="text-xs font-bold truncate">{authUser.username}</span>
+                  {cloudBooks.length > 0 && (
+                    <Tooltip><TooltipTrigger asChild><Crown className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" /></TooltipTrigger><TooltipContent>Suscriptor KlioReader Cloud</TooltipContent></Tooltip>
+                  )}
                 </div>
                 <Button variant="ghost" size="sm" className="w-full justify-start text-xs opacity-50" onClick={handleLogout}><LogOut className="w-3 h-3 mr-2" /> Cerrar Sesión</Button>
               </div>
             ) : (
               <Button variant="outline" size="sm" className="w-full text-xs border-white/10" onClick={() => setActiveTab('cloud')}><LogIn className="w-3 h-3 mr-2" /> Iniciar Sesión</Button>
+            )}
+            {/* Sync indicator */}
+            {storageConfigured && (
+              <div className="my-2">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      className={`flex items-center gap-1.5 text-[10px] w-full px-2 py-1 rounded-md transition-colors ${
+                        syncStatus.syncing
+                          ? 'text-amber-400 bg-amber-400/10'
+                          : syncStatus.error
+                          ? 'text-red-400 bg-red-400/10'
+                          : syncStatus.last_sync
+                          ? 'text-green-400/60 hover:bg-white/5'
+                          : 'text-white/30 hover:bg-white/5'
+                      }`}
+                      onClick={() => { setActiveTab('settings'); setSettingsTab('storage'); }}
+                    >
+                      {syncStatus.syncing ? (
+                        <RefreshCw className="w-3 h-3 animate-spin" />
+                      ) : syncStatus.error ? (
+                        <WifiOff className="w-3 h-3" />
+                      ) : syncStatus.last_sync ? (
+                        <Check className="w-3 h-3" />
+                      ) : (
+                        <HardDrive className="w-3 h-3" />
+                      )}
+                      <span className="truncate font-medium">
+                        {syncStatus.syncing ? 'Sincronizando...' : syncStatus.error ? 'Error sync' : syncStatus.last_sync ? 'Sync OK' : 'Storage'}
+                      </span>
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {syncStatus.syncing ? 'Sincronización en curso...' : syncStatus.error ? `Error: ${syncStatus.error}` : syncStatus.last_sync ? `Último sync: ${new Date(syncStatus.last_sync).toLocaleString()}` : 'Storage de usuario configurado'}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
             )}
             <Separator className="my-3 opacity-10" />
             <div className="space-y-1">
@@ -1173,18 +1628,23 @@ function App() {
                       </div>
                     </TooltipTrigger><TooltipContent>{queueCount} en cola: {queueSummary}</TooltipContent></Tooltip>
                   )}
-                  {libraryPath ? (
-                    <Tooltip><TooltipTrigger asChild>
-                      <Button onClick={selectLibraryFolder} variant="ghost" size="icon" className="h-8 w-8 opacity-50 hover:opacity-100">
-                        <FolderOpen className="w-4 h-4" />
-                      </Button>
-                    </TooltipTrigger><TooltipContent>Cambiar carpeta</TooltipContent></Tooltip>
-                  ) : (
-                    <Button onClick={selectLibraryFolder} variant="outline" size="sm" className="border-white/10 font-bold tracking-tight">CONFIGURAR CARPETA</Button>
-                  )}
                 </div>
               </header>
               <ScrollArea className="flex-1 p-12">
+                {!libraryPath && books.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-32 space-y-6">
+                    <FolderOpen className="w-16 h-16 opacity-15" />
+                    <div className="text-center space-y-2">
+                      <p className="text-lg font-bold opacity-60">{isMobile ? 'Biblioteca vacía' : 'Sin carpeta de biblioteca'}</p>
+                      <p className="text-sm opacity-30 max-w-md">{isMobile ? 'Descarga libros desde la nube para empezar a leer.' : 'Configura una carpeta donde tengas tus libros (EPUB, PDF) para empezar a leer.'}</p>
+                    </div>
+                    {!isMobile && (
+                      <Button className="gap-2 font-bold" onClick={() => { setActiveTab('settings'); setSettingsTab('folder'); }}>
+                        <Settings2 className="w-4 h-4" /> Ir a Configuración
+                      </Button>
+                    )}
+                  </div>
+                ) : (
                 <div className={`
                   ${libraryView === 'grid-large' ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-16' : ''}
                   ${libraryView === 'grid-mini' ? 'flex flex-wrap gap-4' : ''}
@@ -1291,6 +1751,7 @@ function App() {
                     </div>
                   ))}
                 </div>
+                )}
               </ScrollArea>
 
               {/* Edit Local Book Dialog */}
@@ -1364,6 +1825,47 @@ function App() {
                 ) : (
                   /* Cloud dashboard */
                   <div className="space-y-8">
+                    {/* Pending invitations */}
+                    {pendingShares.length > 0 && (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h2 className="text-lg font-bold flex items-center gap-2"><Bell className="w-5 h-5 text-amber-400" /> Invitaciones ({pendingShares.length})</h2>
+                          <Button variant="ghost" size="sm" onClick={() => setShowInvitations(prev => !prev)} className="text-xs opacity-50">
+                            {showInvitations ? <><ChevronUp className="w-3 h-3 mr-1" /> Ocultar</> : <><ChevronDown className="w-3 h-3 mr-1" /> Mostrar</>}
+                          </Button>
+                        </div>
+                        {showInvitations && pendingShares.map(share => (
+                          <Card key={share.id} className="bg-amber-500/5 border-amber-500/20 p-4 space-y-3">
+                            <div className="flex gap-4">
+                              <div className="w-12 aspect-[2/3] rounded bg-[#0f0f14] overflow-hidden shrink-0 border border-white/10 flex items-center justify-center">
+                                {share.snap_cover_base64 ? <img src={coverSrc(share.snap_cover_base64)} className="w-full h-full object-contain" alt="" /> : <BookOpen className="w-4 h-4 opacity-10" />}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <h3 className="text-sm font-bold truncate">{share.snap_title}</h3>
+                                <p className="text-[10px] opacity-50 italic">{share.snap_author || 'Sin autor'}</p>
+                                {share.snap_description && <p className="text-[10px] opacity-40 mt-1 line-clamp-2">{share.snap_description}</p>}
+                                <div className="flex items-center gap-2 mt-2">
+                                  <User className="w-3 h-3 text-primary" />
+                                  <span className="text-[10px] font-bold">{share.from_username}</span>
+                                  <span className="text-[10px] opacity-30">te compartió este libro</span>
+                                </div>
+                                {share.message && <p className="text-[10px] opacity-60 mt-1 italic bg-white/5 rounded px-2 py-1">"{share.message}"</p>}
+                              </div>
+                            </div>
+                            <div className="flex gap-2">
+                              <Button size="sm" className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold" onClick={() => handleAcceptShare(share.id)}>
+                                <Check className="w-3 h-3 mr-1" /> Aceptar
+                              </Button>
+                              <Button size="sm" variant="outline" className="flex-1 border-white/10" onClick={() => handleRejectShare(share.id)}>
+                                <X className="w-3 h-3 mr-1" /> Rechazar
+                              </Button>
+                            </div>
+                          </Card>
+                        ))}
+                        <Separator className="opacity-10" />
+                      </div>
+                    )}
+
                     <div className="flex items-center justify-between">
                       <div>
                         <h2 className="text-lg font-bold flex items-center gap-2"><Cloud className="w-5 h-5 text-blue-400" /> Mis Libros en la Nube</h2>
@@ -1383,33 +1885,71 @@ function App() {
                     ) : (
                       <div className="space-y-3">
                         {cloudBooks.map(cb => (
-                          <Card key={cb.id} className="flex bg-white/5 border-white/5 p-4 gap-4 items-center">
-                            <div className="w-12 aspect-[2/3] rounded bg-[#0f0f14] overflow-hidden shrink-0 border border-white/10 flex items-center justify-center">
-                              {cb.cover_base64 ? <img src={coverSrc(cb.cover_base64)} className="w-full h-full object-contain" alt="" /> : <BookOpen className="w-4 h-4 opacity-10" />}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <h3 className="text-sm font-bold truncate">{cb.title}</h3>
-                              <p className="text-[10px] opacity-50 italic">{cb.author || 'Sin autor'}</p>
-                              <div className="flex items-center gap-3 mt-1">
-                                <Progress value={cb.progress_percent} className="h-1 flex-1 max-w-[120px] bg-white/5" indicatorClassName="bg-blue-400" />
-                                <span className="text-[9px] font-bold text-blue-400">{cb.progress_percent}%</span>
-                                <Badge variant="outline" className="text-[8px] h-4 opacity-50">{cb.file_type}</Badge>
+                          <div key={cb.id}>
+                            <Card className="flex bg-white/5 border-white/5 p-4 gap-4 items-center">
+                              <div className="w-12 aspect-[2/3] rounded bg-[#0f0f14] overflow-hidden shrink-0 border border-white/10 flex items-center justify-center">
+                                {cb.cover_base64 ? <img src={coverSrc(cb.cover_base64)} className="w-full h-full object-contain" alt="" /> : <BookOpen className="w-4 h-4 opacity-10" />}
                               </div>
-                            </div>
-                            <div className="flex gap-1">
-                              <Tooltip><TooltipTrigger asChild>
-                                <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-primary/20 hover:text-primary" onClick={() => startEditCloudBook(cb)}><Pencil className="w-4 h-4" /></Button>
-                              </TooltipTrigger><TooltipContent>Editar</TooltipContent></Tooltip>
-                              <Tooltip><TooltipTrigger asChild>
-                                <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-green-600/20 hover:text-green-400" disabled={downloadingBookId === cb.id} onClick={() => downloadBookFromCloud(cb)}>
-                                  {downloadingBookId === cb.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <CloudDownload className="w-4 h-4" />}
-                                </Button>
-                              </TooltipTrigger><TooltipContent>Descargar a local</TooltipContent></Tooltip>
-                              <Tooltip><TooltipTrigger asChild>
-                                <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-red-600/20 hover:text-red-400" onClick={() => deleteCloudBook(cb.id)}><Trash2 className="w-4 h-4" /></Button>
-                              </TooltipTrigger><TooltipContent>Eliminar de la nube</TooltipContent></Tooltip>
-                            </div>
-                          </Card>
+                              <div className="flex-1 min-w-0">
+                                <h3 className="text-sm font-bold truncate">{cb.title}</h3>
+                                <p className="text-[10px] opacity-50 italic">{cb.author || 'Sin autor'}</p>
+                                <div className="flex items-center gap-3 mt-1 flex-wrap">
+                                  <Progress value={cb.progress_percent} className="h-1 flex-1 max-w-[120px] bg-white/5" indicatorClassName="bg-blue-400" />
+                                  <span className="text-[9px] font-bold text-blue-400">{cb.progress_percent}%</span>
+                                  <Badge variant="outline" className="text-[8px] h-4 opacity-50">{cb.file_type}</Badge>
+                                  {cb.is_duplicate && <Badge variant="outline" className="text-[8px] h-4 text-amber-400 border-amber-400/40">Duplicado</Badge>}
+                                  {cb.share_count > 0 && <Badge variant="outline" className="text-[8px] h-4 text-cyan-400 border-cyan-400/40"><Users className="w-2.5 h-2.5 mr-0.5" /> Compartido</Badge>}
+                                </div>
+                              </div>
+                              <div className="flex gap-1">
+                                <Tooltip><TooltipTrigger asChild>
+                                  <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-primary/20 hover:text-primary" onClick={() => startEditCloudBook(cb)}><Pencil className="w-4 h-4" /></Button>
+                                </TooltipTrigger><TooltipContent>Editar</TooltipContent></Tooltip>
+                                <Tooltip><TooltipTrigger asChild>
+                                  <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-cyan-600/20 hover:text-cyan-400" onClick={() => openShareDialog(cb)}><Share2 className="w-4 h-4" /></Button>
+                                </TooltipTrigger><TooltipContent>Compartir</TooltipContent></Tooltip>
+                                <Tooltip><TooltipTrigger asChild>
+                                  <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-green-600/20 hover:text-green-400" disabled={downloadingBookId === cb.id} onClick={() => downloadBookFromCloud(cb)}>
+                                    {downloadingBookId === cb.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <CloudDownload className="w-4 h-4" />}
+                                  </Button>
+                                </TooltipTrigger><TooltipContent>Descargar a local</TooltipContent></Tooltip>
+                                <Tooltip><TooltipTrigger asChild>
+                                  <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-red-600/20 hover:text-red-400" onClick={() => deleteCloudBook(cb.id)}><Trash2 className="w-4 h-4" /></Button>
+                                </TooltipTrigger><TooltipContent>Eliminar de la nube</TooltipContent></Tooltip>
+                              </div>
+                            </Card>
+                            {/* Shared progress expandable */}
+                            {cb.share_count > 0 && (
+                              <div className="ml-16 mt-1">
+                                <button className="text-[10px] text-cyan-400/70 hover:text-cyan-400 flex items-center gap-1" onClick={() => toggleShareProgress(cb.id)}>
+                                  <Users className="w-3 h-3" />
+                                  {expandedShareProgress === cb.id ? 'Ocultar progreso' : 'Ver progreso compartido'}
+                                  {expandedShareProgress === cb.id ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                                </button>
+                                {expandedShareProgress === cb.id && sharedProgressMap[cb.id] && (
+                                  <div className="mt-2 space-y-2">
+                                    {sharedProgressMap[cb.id].length === 0 ? (
+                                      <p className="text-[10px] opacity-30">Sin datos de progreso compartido</p>
+                                    ) : sharedProgressMap[cb.id].map(sp => (
+                                      <div key={sp.user_id} className="flex items-center gap-3 bg-white/5 rounded-lg px-3 py-2">
+                                        <div className="w-6 h-6 rounded-full bg-cyan-400/20 flex items-center justify-center shrink-0">
+                                          <User className="w-3 h-3 text-cyan-400" />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                          <p className="text-[10px] font-bold truncate">{sp.username}</p>
+                                          <div className="flex items-center gap-2 mt-0.5">
+                                            <Progress value={sp.progress_percent} className="h-1 flex-1 max-w-[80px] bg-white/5" indicatorClassName="bg-cyan-400" />
+                                            <span className="text-[9px] font-bold text-cyan-400">{sp.progress_percent}%</span>
+                                          </div>
+                                        </div>
+                                        {sp.last_read && <span className="text-[9px] opacity-30 shrink-0">{new Date(sp.last_read).toLocaleDateString()}</span>}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         ))}
                       </div>
                     )}
@@ -1441,6 +1981,75 @@ function App() {
                   </DialogContent>
                 </Dialog>
 
+                {/* Share Book Dialog */}
+                <Dialog open={!!sharingBook} onOpenChange={(open) => { if (!open) setSharingBook(null); }}>
+                  <DialogContent className="sm:max-w-[425px] bg-[#16161e] border-white/10 text-white">
+                    <DialogHeader><DialogTitle className="flex items-center gap-2"><Share2 className="w-5 h-5 text-cyan-400" /> Compartir Libro</DialogTitle></DialogHeader>
+                    {sharingBook && (
+                      <div className="space-y-4 py-4">
+                        {/* Book preview */}
+                        <div className="flex gap-3 items-center bg-white/5 rounded-lg p-3">
+                          <div className="w-10 aspect-[2/3] rounded bg-[#0f0f14] overflow-hidden shrink-0 border border-white/10 flex items-center justify-center">
+                            {sharingBook.cover_base64 ? <img src={coverSrc(sharingBook.cover_base64)} className="w-full h-full object-contain" alt="" /> : <BookOpen className="w-3 h-3 opacity-10" />}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-bold truncate">{sharingBook.title}</p>
+                            <p className="text-[10px] opacity-50 italic">{sharingBook.author || 'Sin autor'}</p>
+                          </div>
+                        </div>
+
+                        {/* Search users */}
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold uppercase opacity-50 tracking-widest">Buscar usuario</label>
+                          <div className="relative">
+                            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 opacity-30" />
+                            <input
+                              value={shareSearchQuery}
+                              onChange={e => handleShareSearch(e.target.value)}
+                              placeholder="Escribe un nombre de usuario..."
+                              className="w-full bg-white/5 border border-white/10 rounded-lg pl-10 pr-4 py-3 text-sm focus:border-primary outline-none"
+                            />
+                            {shareSearching && <Loader2 className="w-4 h-4 animate-spin absolute right-3 top-1/2 -translate-y-1/2 opacity-50" />}
+                          </div>
+                        </div>
+
+                        {/* Search results */}
+                        {shareSearchResults.length > 0 && (
+                          <div className="space-y-1 max-h-48 overflow-y-auto">
+                            {shareSearchResults.map(u => (
+                              <div key={u.id} className="flex items-center gap-3 bg-white/5 rounded-lg px-3 py-2 hover:bg-white/10 transition-colors">
+                                <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
+                                  <User className="w-3.5 h-3.5 text-primary" />
+                                </div>
+                                <span className="text-sm font-medium flex-1 truncate">{u.username}</span>
+                                <Button size="sm" className="h-7 text-xs px-3" disabled={shareSending === u.id} onClick={() => handleSendShare(u.id)}>
+                                  {shareSending === u.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <><Send className="w-3 h-3 mr-1" /> Enviar</>}
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {shareSearchQuery.length >= 2 && shareSearchResults.length === 0 && !shareSearching && (
+                          <p className="text-[10px] opacity-30 text-center py-2">No se encontraron usuarios</p>
+                        )}
+
+                        {/* Optional message */}
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold uppercase opacity-50 tracking-widest">Mensaje (opcional)</label>
+                          <input
+                            value={shareMessage}
+                            onChange={e => setShareMessage(e.target.value)}
+                            placeholder="Ej: Te recomiendo este libro..."
+                            className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-sm focus:border-primary outline-none"
+                            maxLength={200}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </DialogContent>
+                </Dialog>
+
                 {/* Profile Dialog */}
                 <Dialog open={showProfile} onOpenChange={setShowProfile}>
                   <DialogContent className="sm:max-w-[425px] bg-[#16161e] border-white/10 text-white">
@@ -1460,6 +2069,25 @@ function App() {
                               <span>{profile.total_bookmarks} marcadores</span>
                             </div>
                           </div>
+                        </div>
+                      )}
+                      {/* Storage usage */}
+                      {profile && profile.upload_limit > 0 && (
+                        <div className="space-y-2 pb-4 border-b border-white/10">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold uppercase opacity-50 tracking-widest flex items-center gap-1.5"><Cloud className="w-3 h-3" /> Almacenamiento Cloud</span>
+                            <span className="text-xs opacity-60">{formatBytes(profile.storage_used)} / {formatBytes(profile.upload_limit)}</span>
+                          </div>
+                          <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all ${
+                                (profile.storage_used / profile.upload_limit) > 0.9 ? 'bg-red-500' :
+                                (profile.storage_used / profile.upload_limit) > 0.7 ? 'bg-amber-500' : 'bg-primary'
+                              }`}
+                              style={{ width: `${Math.min(100, (profile.storage_used / profile.upload_limit) * 100)}%` }}
+                            />
+                          </div>
+                          <p className="text-[10px] opacity-30">{formatBytes(profile.upload_limit - profile.storage_used)} disponibles</p>
                         </div>
                       )}
                       <div className="space-y-2">
@@ -1722,6 +2350,440 @@ function App() {
               </ScrollArea>
             );
           })()}
+
+          {activeTab === 'settings' && (
+            <ScrollArea className="flex-1">
+              <div className="max-w-3xl mx-auto p-8 space-y-6">
+                <h2 className="text-2xl font-black tracking-tight">Configuración</h2>
+
+                {/* Sub-tabs */}
+                <div className="flex bg-white/5 rounded-lg p-1 w-fit">
+                  <Button variant={settingsTab === 'display' ? 'secondary' : 'ghost'} size="sm" className="text-xs gap-2" onClick={() => setSettingsTab('display')}><Eye className="w-4 h-4" /> Visualización</Button>
+                  <Button variant={settingsTab === 'llm' ? 'secondary' : 'ghost'} size="sm" className="text-xs gap-2" onClick={() => setSettingsTab('llm')}><Brain className="w-4 h-4" /> API LLM</Button>
+                  <Button variant={settingsTab === 'folder' ? 'secondary' : 'ghost'} size="sm" className="text-xs gap-2" onClick={() => setSettingsTab('folder')}><FolderOpen className="w-4 h-4" /> Carpeta de Libros</Button>
+                  <Button variant={settingsTab === 'storage' ? 'secondary' : 'ghost'} size="sm" className="text-xs gap-2" onClick={() => setSettingsTab('storage')}><HardDrive className="w-4 h-4" /> Mi Storage</Button>
+                </div>
+
+                {/* ── Ficha Visualización ── */}
+                {settingsTab === 'display' && (
+                  <div className="space-y-8">
+                    {/* Vista de Biblioteca */}
+                    <Card className="bg-white/5 border-white/5 p-6 space-y-4">
+                      <h3 className="text-sm font-bold uppercase tracking-widest opacity-50 flex items-center gap-2"><LayoutGrid className="w-4 h-4" /> Vista de Biblioteca</h3>
+                      <div className="flex gap-2">
+                        <Button variant={libraryView === 'grid-large' ? 'default' : 'secondary'} size="sm" className="flex-1 text-xs gap-2" onClick={() => setLibraryView('grid-large')}><LayoutGrid className="w-4 h-4" /> Grande</Button>
+                        <Button variant={libraryView === 'grid-mini' ? 'default' : 'secondary'} size="sm" className="flex-1 text-xs gap-2" onClick={() => setLibraryView('grid-mini')}><Grid2X2 className="w-4 h-4" /> Mini</Button>
+                        <Button variant={libraryView === 'grid-card' ? 'default' : 'secondary'} size="sm" className="flex-1 text-xs gap-2" onClick={() => setLibraryView('grid-card')}><Square className="w-4 h-4" /> Tarjetas</Button>
+                        <Button variant={libraryView === 'list-info' ? 'default' : 'secondary'} size="sm" className="flex-1 text-xs gap-2" onClick={() => setLibraryView('list-info')}><List className="w-4 h-4" /> Lista</Button>
+                      </div>
+                    </Card>
+
+                    {/* Visor */}
+                    <Card className="bg-white/5 border-white/5 p-6 space-y-6">
+                      <h3 className="text-sm font-bold uppercase tracking-widest opacity-50 flex items-center gap-2"><BookOpen className="w-4 h-4" /> Visor de Lectura</h3>
+
+                      {/* Modo de vista */}
+                      <div className="space-y-3">
+                        <p className="text-xs font-bold opacity-40 uppercase tracking-widest">Modo de Vista</p>
+                        <div className="flex gap-2">
+                          <Button variant={readView === 'scroll' ? 'default' : 'secondary'} className="flex-1" size="sm" onClick={() => setReadView('scroll')}><ScrollIcon className="w-4 h-4 mr-2" /> Scroll</Button>
+                          <Button variant={readView === 'paginated' ? 'default' : 'secondary'} className="flex-1" size="sm" onClick={() => setReadView('paginated')}><Columns2 className="w-4 h-4 mr-2" /> Páginas</Button>
+                        </div>
+                        {readView === 'paginated' && (
+                          <div className="flex gap-2 pt-2 border-t border-white/5 mt-2">
+                            <Button variant={pageColumns === 1 ? 'outline' : 'ghost'} className="flex-1 text-xs" size="sm" onClick={() => setPageColumns(1)}><Square className="w-3 h-3 mr-2" /> 1 Columna</Button>
+                            <Button variant={pageColumns === 2 ? 'outline' : 'ghost'} className="flex-1 text-xs" size="sm" onClick={() => setPageColumns(2)}><Columns2 className="w-3 h-3 mr-2" /> 2 Columnas</Button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Tipografía */}
+                      <div className="space-y-3">
+                        <p className="text-xs font-bold opacity-40 uppercase tracking-widest">Tipografía</p>
+                        <div className="grid grid-cols-3 gap-2">
+                          {(['Libre Baskerville', 'Inter', 'Merriweather', 'Literata', 'OpenDyslexic'] as ReaderFont[]).map(font => (
+                            <Button key={font} variant={readerFont === font ? 'outline' : 'ghost'} className="justify-start text-[11px] h-9 truncate" size="sm" onClick={() => setReaderFont(font)} style={{ fontFamily: font }}>{font}</Button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Tamaño de fuente */}
+                      <div className="space-y-3">
+                        <p className="text-xs font-bold opacity-40 uppercase tracking-widest">Tamaño de Fuente</p>
+                        <div className="flex items-center justify-between bg-black/20 p-3 rounded-lg max-w-xs">
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setFontSize(f => Math.max(12, f-2))}><ZoomOut className="w-4 h-4" /></Button>
+                          <span className="text-sm font-mono font-bold">{fontSize}px</span>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setFontSize(f => Math.min(36, f+2))}><ZoomIn className="w-4 h-4" /></Button>
+                        </div>
+                      </div>
+
+                      {/* Tema */}
+                      <div className="space-y-3">
+                        <p className="text-xs font-bold opacity-40 uppercase tracking-widest">Tema del Visor</p>
+                        <div className="flex gap-2 max-w-xs">
+                          <Button variant={readerTheme === 'light' ? 'outline' : 'ghost'} className="flex-1 bg-white text-black hover:bg-gray-100" size="sm" onClick={() => setReaderTheme('light')}>Claro</Button>
+                          <Button variant={readerTheme === 'sepia' ? 'outline' : 'ghost'} className="flex-1 bg-[#f4ecd8] text-[#5b4636] hover:bg-[#ebe2cf]" size="sm" onClick={() => setReaderTheme('sepia')}>Sepia</Button>
+                          <Button variant={readerTheme === 'dark' ? 'outline' : 'ghost'} className="flex-1 bg-[#1e1e2e] text-[#cdd6f4] hover:bg-[#252539]" size="sm" onClick={() => setReaderTheme('dark')}>Oscuro</Button>
+                        </div>
+                      </div>
+                    </Card>
+                  </div>
+                )}
+
+                {/* ── Ficha API LLM ── */}
+                {settingsTab === 'llm' && (
+                  <div className="space-y-6">
+                    <Card className="bg-white/5 border-white/5 p-6 space-y-6">
+                      <div>
+                        <h3 className="text-sm font-bold uppercase tracking-widest opacity-50 flex items-center gap-2"><Brain className="w-4 h-4" /> Proveedor de LLM</h3>
+                        <p className="text-xs opacity-40 mt-1">Selecciona el proveedor de IA para funciones inteligentes (resúmenes, chat, etc.)</p>
+                      </div>
+
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                        {([
+                          { id: 'groq' as LlmProvider, name: 'Groq', desc: 'Rápido y gratuito' },
+                          { id: 'google' as LlmProvider, name: 'Google (Gemini)', desc: 'Modelos Gemini' },
+                          { id: 'anthropic' as LlmProvider, name: 'Anthropic', desc: 'Claude' },
+                          { id: 'openai' as LlmProvider, name: 'OpenAI', desc: 'GPT / o1' },
+                          { id: 'ollama' as LlmProvider, name: 'Ollama', desc: 'Local / Sin API key' },
+                          { id: 'custom' as LlmProvider, name: 'Personalizado', desc: 'Endpoint propio' },
+                        ]).map(p => (
+                          <button
+                            key={p.id}
+                            className={`p-4 rounded-xl border text-left transition-all ${
+                              llmProvider === p.id
+                                ? 'border-primary bg-primary/10 ring-1 ring-primary/30'
+                                : 'border-white/10 bg-white/[0.02] hover:bg-white/5'
+                            }`}
+                            onClick={() => setLlmProvider(p.id)}
+                          >
+                            <p className="text-sm font-bold">{p.name}</p>
+                            <p className="text-[10px] opacity-50 mt-0.5">{p.desc}</p>
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="space-y-3">
+                        <p className="text-xs font-bold opacity-40 uppercase tracking-widest flex items-center gap-2"><Key className="w-3 h-3" /> API Key</p>
+                        <input
+                          type="password"
+                          value={llmApiKey}
+                          onChange={e => setLlmApiKey(e.target.value)}
+                          placeholder={llmProvider === 'ollama' ? 'No requiere API key' : 'Ingresa tu API key...'}
+                          disabled={llmProvider === 'ollama'}
+                          className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-sm focus:border-primary outline-none disabled:opacity-30 disabled:cursor-not-allowed"
+                        />
+                        <p className="text-[10px] opacity-30 flex items-center gap-1">
+                          <Info className="w-3 h-3" /> Se guarda solo en este dispositivo. Nunca se envía a nuestros servidores.
+                        </p>
+                      </div>
+                    </Card>
+                  </div>
+                )}
+
+                {/* ── Ficha Carpeta de Libros ── */}
+                {settingsTab === 'folder' && (
+                  <div className="space-y-6">
+                    <Card className="bg-white/5 border-white/5 p-6 space-y-5">
+                      <h3 className="text-sm font-bold uppercase tracking-widest opacity-50 flex items-center gap-2"><FolderOpen className="w-4 h-4" /> Carpeta de Biblioteca</h3>
+
+                      {libraryPath ? (
+                        <div className="space-y-4">
+                          <div className="bg-black/20 rounded-lg p-4 space-y-2">
+                            <p className="text-[10px] font-bold opacity-40 uppercase tracking-widest">Ruta actual</p>
+                            <p className="text-sm font-mono break-all opacity-80">{libraryPath}</p>
+                            {isMobile && <p className="text-[10px] opacity-30">Configurada automáticamente</p>}
+                          </div>
+                          <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-2 text-xs opacity-60">
+                              <Library className="w-4 h-4 text-primary" />
+                              <span className="font-bold">{books.length} libro(s) encontrado(s)</span>
+                            </div>
+                          </div>
+                          {!isMobile && (
+                            <Button variant="outline" size="sm" className="border-white/10 gap-2" onClick={selectLibraryFolder}>
+                              <FolderOpen className="w-4 h-4" /> Cambiar Carpeta
+                            </Button>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="text-center py-8 space-y-4">
+                          <FolderOpen className="w-12 h-12 mx-auto opacity-20" />
+                          <div>
+                            <p className="text-sm font-bold opacity-60">Sin carpeta configurada</p>
+                            <p className="text-xs opacity-30 mt-1">{isMobile ? 'La carpeta se configurará automáticamente' : 'Selecciona la carpeta donde tienes tus libros (EPUB, PDF)'}</p>
+                          </div>
+                          {!isMobile && (
+                            <Button className="gap-2 font-bold" onClick={selectLibraryFolder}>
+                              <FolderOpen className="w-4 h-4" /> Seleccionar Carpeta
+                            </Button>
+                          )}
+                        </div>
+                      )}
+                    </Card>
+                  </div>
+                )}
+
+                {/* ── Ficha Mi Storage ── */}
+                {settingsTab === 'storage' && (
+                  <div className="space-y-6">
+                    {/* ── Suscriptor Cloud: solo muestra cuota ── */}
+                    {authUser && cloudBooks.length > 0 ? (
+                      <Card className="bg-white/5 border-white/5 p-6 space-y-6">
+                        <div className="flex items-center gap-3">
+                          <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center">
+                            <Crown className="w-6 h-6 text-amber-400" />
+                          </div>
+                          <div>
+                            <h3 className="text-sm font-bold">KlioReader Cloud</h3>
+                            <p className="text-xs opacity-40">Tu biblioteca se sincroniza con nuestro servidor</p>
+                          </div>
+                        </div>
+
+                        {profile ? (
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold uppercase opacity-50 tracking-widest">Almacenamiento</span>
+                              <span className="text-sm font-bold">{formatBytes(profile.storage_used)} <span className="opacity-40 font-normal">/ {formatBytes(profile.upload_limit)}</span></span>
+                            </div>
+                            <div className="w-full h-3 bg-white/5 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full rounded-full transition-all ${
+                                  (profile.storage_used / profile.upload_limit) > 0.9 ? 'bg-red-500' :
+                                  (profile.storage_used / profile.upload_limit) > 0.7 ? 'bg-amber-500' : 'bg-primary'
+                                }`}
+                                style={{ width: `${Math.min(100, (profile.storage_used / profile.upload_limit) * 100)}%` }}
+                              />
+                            </div>
+                            <div className="flex justify-between text-[10px] opacity-40">
+                              <span>{Math.round((profile.storage_used / profile.upload_limit) * 100)}% usado</span>
+                              <span>{formatBytes(profile.upload_limit - profile.storage_used)} disponibles</span>
+                            </div>
+                          </div>
+                        ) : (
+                          <Button variant="outline" size="sm" className="border-white/10 gap-2" onClick={() => loadProfile(false)}>
+                            <Loader2 className="w-4 h-4" /> Cargar datos de almacenamiento
+                          </Button>
+                        )}
+
+                        <Separator className="opacity-10" />
+
+                        <div className="flex items-center gap-3 text-[10px] opacity-30">
+                          <Cloud className="w-4 h-4 flex-shrink-0" />
+                          <span>{cloudBooks.length} libro(s) en la nube. Gestiona tu biblioteca desde la pestaña Nube.</span>
+                        </div>
+                      </Card>
+                    ) : (
+                      /* ── No suscriptor: config de storage propio ── */
+                      <>
+                    <Card className="bg-white/5 border-white/5 p-6 space-y-6">
+                      <div>
+                        <h3 className="text-sm font-bold uppercase tracking-widest opacity-50 flex items-center gap-2"><HardDrive className="w-4 h-4" /> Proveedor de Storage</h3>
+                        <p className="text-xs opacity-40 mt-1">Sincroniza tu biblioteca con tu propio almacenamiento. Los datos nunca pasan por nuestro servidor.</p>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-3">
+                        {([
+                          { id: 's3' as UserStorageProvider, name: 'S3-Compatible', desc: 'AWS, Backblaze, MinIO, Wasabi' },
+                          { id: 'webdav' as UserStorageProvider, name: 'WebDAV', desc: 'Nextcloud, ownCloud, etc.' },
+                          { id: 'gdrive' as UserStorageProvider, name: 'Google Drive', desc: 'Tu cuenta de Google' },
+                        ]).map(p => (
+                          <button
+                            key={p.id}
+                            className={`p-4 rounded-xl border text-left transition-all ${
+                              storageConfig.provider === p.id
+                                ? 'border-primary bg-primary/10 ring-1 ring-primary/30'
+                                : 'border-white/10 bg-white/[0.02] hover:bg-white/5'
+                            }`}
+                            onClick={() => handleStorageConfigChange({ provider: p.id })}
+                          >
+                            <p className="text-sm font-bold">{p.name}</p>
+                            <p className="text-[10px] opacity-50 mt-0.5">{p.desc}</p>
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* S3 Config */}
+                      {storageConfig.provider === 's3' && (
+                        <div className="space-y-3">
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="text-[10px] font-bold opacity-40 uppercase">Endpoint (vacío = AWS)</label>
+                              <input value={storageConfig.s3_endpoint || ''} onChange={e => handleStorageConfigChange({ s3_endpoint: e.target.value })} placeholder="https://s3.us-west-000.backblazeb2.com" className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-primary outline-none mt-1" />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold opacity-40 uppercase">Región</label>
+                              <input value={storageConfig.s3_region || ''} onChange={e => handleStorageConfigChange({ s3_region: e.target.value })} placeholder="us-east-1" className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-primary outline-none mt-1" />
+                            </div>
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold opacity-40 uppercase">Bucket</label>
+                            <input value={storageConfig.s3_bucket || ''} onChange={e => handleStorageConfigChange({ s3_bucket: e.target.value })} placeholder="mi-bucket" className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-primary outline-none mt-1" />
+                          </div>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="text-[10px] font-bold opacity-40 uppercase">Access Key</label>
+                              <input value={storageConfig.s3_access_key || ''} onChange={e => handleStorageConfigChange({ s3_access_key: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-primary outline-none mt-1 font-mono" />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold opacity-40 uppercase">Secret Key</label>
+                              <input type="password" value={storageConfig.s3_secret_key || ''} onChange={e => handleStorageConfigChange({ s3_secret_key: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-primary outline-none mt-1 font-mono" />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* WebDAV Config */}
+                      {storageConfig.provider === 'webdav' && (
+                        <div className="space-y-3">
+                          <div>
+                            <label className="text-[10px] font-bold opacity-40 uppercase">URL del servidor WebDAV</label>
+                            <input value={storageConfig.webdav_url || ''} onChange={e => handleStorageConfigChange({ webdav_url: e.target.value })} placeholder="https://mi-nextcloud.com/remote.php/dav/files/usuario" className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-primary outline-none mt-1" />
+                          </div>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="text-[10px] font-bold opacity-40 uppercase">Usuario</label>
+                              <input value={storageConfig.webdav_username || ''} onChange={e => handleStorageConfigChange({ webdav_username: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-primary outline-none mt-1" />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold opacity-40 uppercase">Contraseña</label>
+                              <input type="password" value={storageConfig.webdav_password || ''} onChange={e => handleStorageConfigChange({ webdav_password: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-primary outline-none mt-1" />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Google Drive Config */}
+                      {storageConfig.provider === 'gdrive' && (
+                        <div className="space-y-3">
+                          <div>
+                            <label className="text-[10px] font-bold opacity-40 uppercase">Client ID (Google Cloud Console)</label>
+                            <input value={storageConfig.gdrive_client_id || ''} onChange={e => handleStorageConfigChange({ gdrive_client_id: e.target.value })} placeholder="xxxx.apps.googleusercontent.com" className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-primary outline-none mt-1" />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold opacity-40 uppercase">Client Secret</label>
+                            <input type="password" value={storageConfig.gdrive_client_secret || ''} onChange={e => handleStorageConfigChange({ gdrive_client_secret: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-primary outline-none mt-1 font-mono" />
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <Button
+                              onClick={handleGDriveAuth}
+                              disabled={gdriveAuthLoading || !storageConfig.gdrive_client_id || !storageConfig.gdrive_client_secret}
+                              className="gap-2"
+                            >
+                              {gdriveAuthLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogIn className="w-4 h-4" />}
+                              {storageConfig.gdrive_refresh_token ? 'Reconectar con Google' : 'Conectar con Google'}
+                            </Button>
+                            {storageConfig.gdrive_refresh_token && (
+                              <span className="text-xs text-green-400 flex items-center gap-1"><Check className="w-3 h-3" /> Conectado</span>
+                            )}
+                          </div>
+                          <p className="text-[10px] opacity-30 flex items-center gap-1">
+                            <Info className="w-3 h-3" /> Necesitas crear un proyecto en Google Cloud Console con la API de Drive activada.
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Path prefix */}
+                      {storageConfig.provider !== 'gdrive' && (
+                        <div>
+                          <label className="text-[10px] font-bold opacity-40 uppercase">Prefijo de ruta (carpeta en el storage)</label>
+                          <input value={storageConfig.path_prefix || ''} onChange={e => handleStorageConfigChange({ path_prefix: e.target.value })} placeholder="klioreader/" className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-primary outline-none mt-1 font-mono" />
+                        </div>
+                      )}
+
+                      <p className="text-[10px] opacity-30 flex items-center gap-1">
+                        <Info className="w-3 h-3" /> Las credenciales se guardan solo en este dispositivo. Nunca se envían a nuestros servidores.
+                      </p>
+                    </Card>
+
+                    {/* Test connection + Sync controls */}
+                    <Card className="bg-white/5 border-white/5 p-6 space-y-5">
+                      <h3 className="text-sm font-bold uppercase tracking-widest opacity-50 flex items-center gap-2"><RefreshCw className="w-4 h-4" /> Sincronización</h3>
+
+                      <div className="flex items-center gap-3">
+                        <Button variant="outline" size="sm" className="border-white/10 gap-2" onClick={handleTestConnection} disabled={storageTesting || !storageConfigured}>
+                          {storageTesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wifi className="w-4 h-4" />}
+                          Probar Conexión
+                        </Button>
+                        {storageTestResult && (
+                          <span className={`text-xs flex items-center gap-1 ${storageTestResult.ok ? 'text-green-400' : 'text-red-400'}`}>
+                            {storageTestResult.ok ? <Check className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
+                            {storageTestResult.msg}
+                          </span>
+                        )}
+                      </div>
+
+                      <Separator className="opacity-10" />
+
+                      <div className="flex items-center gap-3">
+                        <Button onClick={handleSyncNow} disabled={syncingManual || !storageConfigured} className="gap-2">
+                          {syncingManual ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                          Sincronizar Ahora
+                        </Button>
+                        {syncStatus.last_sync && (
+                          <span className="text-xs opacity-40">Último sync: {new Date(syncStatus.last_sync).toLocaleString()}</span>
+                        )}
+                      </div>
+
+                      <Separator className="opacity-10" />
+
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-sm font-bold">Auto-sync</p>
+                            <p className="text-[10px] opacity-40">Sincronizar automáticamente cada cierto intervalo</p>
+                          </div>
+                          <button
+                            onClick={handleToggleAutoSync}
+                            disabled={!storageConfigured}
+                            className={`relative w-11 h-6 rounded-full transition-colors ${
+                              storageConfig.auto_sync_enabled ? 'bg-primary' : 'bg-white/10'
+                            } ${!storageConfigured ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'}`}
+                          >
+                            <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
+                              storageConfig.auto_sync_enabled ? 'translate-x-5' : ''
+                            }`} />
+                          </button>
+                        </div>
+
+                        {storageConfig.auto_sync_enabled && (
+                          <div>
+                            <label className="text-[10px] font-bold opacity-40 uppercase">Intervalo</label>
+                            <div className="flex gap-2 mt-1">
+                              {[
+                                { label: '1 min', secs: 60 },
+                                { label: '5 min', secs: 300 },
+                                { label: '15 min', secs: 900 },
+                                { label: '30 min', secs: 1800 },
+                              ].map(opt => (
+                                <Button
+                                  key={opt.secs}
+                                  variant={(storageConfig.auto_sync_interval || 300) === opt.secs ? 'default' : 'secondary'}
+                                  size="sm"
+                                  className="text-xs"
+                                  onClick={() => handleAutoSyncIntervalChange(opt.secs)}
+                                >
+                                  {opt.label}
+                                </Button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {syncStatus.error && (
+                        <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3">
+                          <p className="text-xs text-red-400 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> {syncStatus.error}</p>
+                        </div>
+                      )}
+                    </Card>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            </ScrollArea>
+          )}
         </main>
       </div>
     );

@@ -378,6 +378,7 @@ load_keystore_conf() {
 # Recolectar artefactos, firmar APKs y limpiar intermedios
 collect_and_clean() {
     local build_type="$1"  # "desktop", "android", "both"
+    local mode="${2:-}"     # "binary_only" o vacío
     local timestamp
     timestamp=$(date '+%Y-%m-%d_%H-%M-%S')
     local out_dir="$BUILDS_DIR/${APP_NAME}-v${APP_VERSION}_${timestamp}"
@@ -413,7 +414,7 @@ collect_and_clean() {
         fi
 
         local bundle_dir="$TAURI_DIR/target/release/bundle"
-        if [[ -d "$bundle_dir" ]]; then
+        if [[ -d "$bundle_dir" ]] && [[ "$mode" != "binary_only" ]]; then
             find "$bundle_dir" -maxdepth 2 -type f \( \
                 -name "*.deb" -o -name "*.rpm" -o -name "*.AppImage" \
                 -o -name "*.exe" -o -name "*.msi" -o -name "*.dmg" \
@@ -805,7 +806,7 @@ cmd_build_desktop() {
     local build_ok=true
 
     if [[ ${#real_bundles[@]} -gt 0 ]]; then
-        # Tiene bundles reales → usar tauri build (también genera el binario)
+        # Tiene bundles reales → usar tauri build
         local bundle_arg
         bundle_arg=$(IFS=','; echo "${real_bundles[*]}")
         step "Ejecutando: ${DIM}npm run tauri build -- --bundles ${bundle_arg} ${extra_args}${NC}"
@@ -814,20 +815,11 @@ cmd_build_desktop() {
             build_ok=false
         fi
     else
-        # Solo binario → compilar frontend + cargo build
-        step "Compilando frontend..."
-        if npm run build; then
-            echo ""
-            step "Compilando binario Rust..."
-            if [[ "$cargo_profile" == "release" ]]; then
-                (cd "$TAURI_DIR" && cargo build --release)
-            else
-                (cd "$TAURI_DIR" && cargo build)
-            fi
-            if [[ $? -ne 0 ]]; then
-                build_ok=false
-            fi
-        else
+        # Solo binario → tauri build con bundle mínimo (deb), solo nos interesa el binario
+        step "Ejecutando: ${DIM}npm run tauri build -- --bundles deb ${extra_args}${NC}"
+        info "${DIM}(se genera un .deb como subproducto, solo se recogerá el binario)${NC}"
+        echo ""
+        if ! npm run tauri build -- --bundles deb $extra_args; then
             build_ok=false
         fi
     fi
@@ -837,7 +829,11 @@ cmd_build_desktop() {
         echo ""
         success "Build Desktop completado en ${GREEN}${elapsed}s${NC}"
 
-        collect_and_clean "desktop"
+        if $want_binary && [[ ${#real_bundles[@]} -eq 0 ]]; then
+            collect_and_clean "desktop" "binary_only"
+        else
+            collect_and_clean "desktop"
+        fi
     else
         echo ""
         error "El build falló. Revisa los errores arriba."

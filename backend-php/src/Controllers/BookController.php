@@ -69,6 +69,7 @@ class BookController
         $books = $stmt->fetchAll();
 
         // Convert numeric fields
+        $seenFileIds = array();
         foreach ($books as &$b) {
             $b['id'] = (int)$b['id'];
             $b['file_size'] = (int)$b['file_size'];
@@ -76,7 +77,36 @@ class BookController
             $b['current_chapter'] = (int)(isset($b['current_chapter']) ? $b['current_chapter'] : 0);
             $b['current_page'] = (int)(isset($b['current_page']) ? $b['current_page'] : 0);
             $b['progress_percent'] = (int)(isset($b['progress_percent']) ? $b['progress_percent'] : 0);
+            $b['stored_file_id'] = $b['stored_file_id'] !== null ? (int)$b['stored_file_id'] : null;
+            if ($b['stored_file_id'] !== null) {
+                $seenFileIds[$b['stored_file_id']][] = $b['id'];
+            }
         }
+        unset($b);
+
+        // Mark duplicates
+        $dupFileIds = array();
+        foreach ($seenFileIds as $sfId => $bookIds) {
+            if (count($bookIds) > 1) {
+                $dupFileIds[$sfId] = true;
+            }
+        }
+        foreach ($books as &$b) {
+            $b['is_duplicate'] = ($b['stored_file_id'] !== null && isset($dupFileIds[$b['stored_file_id']]));
+        }
+        unset($b);
+
+        // Add share_count for each book
+        $userId = $params['user_id'];
+        foreach ($books as &$b) {
+            $b['share_count'] = 0;
+            if ($b['stored_file_id'] !== null) {
+                $stmt = $db->prepare('SELECT COUNT(*) FROM book_shares WHERE stored_file_id = ? AND status = ? AND (from_user_id = ? OR to_user_id = ?)');
+                $stmt->execute(array($b['stored_file_id'], 'accepted', $userId, $userId));
+                $b['share_count'] = (int)$stmt->fetchColumn();
+            }
+        }
+        unset($b);
 
         echo json_encode($books);
     }

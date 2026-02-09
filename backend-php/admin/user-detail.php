@@ -46,9 +46,11 @@ $stmt = $pdo->prepare('
     SELECT b.id, b.title, b.author, b.file_type, b.file_size, b.total_chapters, b.created_at,
            COALESCE(rp.progress_percent, 0) as progress_percent,
            COALESCE(rp.current_chapter, 0) as current_chapter,
-           rp.last_read
+           rp.last_read,
+           sf.file_hash as md5
     FROM books b
     LEFT JOIN reading_progress rp ON rp.book_id = b.id AND rp.user_id = b.user_id
+    LEFT JOIN stored_files sf ON sf.id = b.stored_file_id
     WHERE b.user_id = ?
     ORDER BY b.created_at DESC
 ');
@@ -77,9 +79,9 @@ $pageTitle = 'Detalle: ' . $user['username'];
 require_once __DIR__ . '/../templates/admin-layout.php';
 ?>
 
-<div class="flex items-center gap-3 mb-6">
+<div class="flex items-center gap-3 mb-6 flex-wrap">
     <a href="<?php echo base_url('admin/users.php'); ?>" class="text-klio-muted hover:text-klio-text transition-colors">&larr;</a>
-    <h1 class="text-2xl font-bold">Detalle de Usuario</h1>
+    <h1 class="text-xl md:text-2xl font-bold">Detalle de Usuario</h1>
     <a href="<?php echo base_url('admin/user-edit.php?id=' . $userId); ?>" class="ml-auto text-klio-primary text-sm hover:underline">Editar &rarr;</a>
 </div>
 
@@ -196,8 +198,8 @@ require_once __DIR__ . '/../templates/admin-layout.php';
 </div>
 
 <!-- Libros del usuario -->
-<div class="bg-klio-card border border-klio-border rounded-xl overflow-hidden">
-    <div class="px-6 py-4 border-b border-klio-border flex items-center justify-between">
+<div class="bg-klio-card border border-klio-border rounded-xl overflow-x-auto">
+    <div class="px-4 md:px-6 py-4 border-b border-klio-border flex items-center justify-between">
         <h3 class="font-bold">Libros (<?php echo $totalBooks; ?>)</h3>
     </div>
     <?php if (empty($books)): ?>
@@ -213,6 +215,7 @@ require_once __DIR__ . '/../templates/admin-layout.php';
                 <th>Progreso</th>
                 <th>Tamano</th>
                 <th>Ultima lectura</th>
+                <th>MD5</th>
                 <th>Subido</th>
                 <th></th>
             </tr>
@@ -242,6 +245,7 @@ require_once __DIR__ . '/../templates/admin-layout.php';
                 </td>
                 <td class="text-klio-muted text-xs"><?php echo format_bytes((int)$b['file_size']); ?></td>
                 <td class="text-klio-muted text-xs"><?php echo $b['last_read'] ? e(substr($b['last_read'], 0, 16)) : '-'; ?></td>
+                <td class="text-klio-muted font-mono text-xs select-all"><?php echo $b['md5'] ? e($b['md5']) : '-'; ?></td>
                 <td class="text-klio-muted text-xs"><?php echo e(substr($b['created_at'], 0, 10)); ?></td>
                 <td class="text-xs whitespace-nowrap">
                     <a href="<?php echo base_url('admin/download.php?id=' . $b['id']); ?>" class="text-klio-primary hover:underline" title="Descargar">&#x21E9;</a>

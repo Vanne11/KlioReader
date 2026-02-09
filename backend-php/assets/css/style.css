@@ -81,12 +81,24 @@
     letter-spacing: 0.05em;
     color: #6c7086;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    white-space: nowrap;
 }
 
 .admin-table tbody td {
     padding: 0.75rem 1rem;
     font-size: 0.875rem;
     border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+@media (max-width: 767px) {
+    .admin-table thead th,
+    .admin-table tbody td {
+        padding: 0.5rem 0.75rem;
+        font-size: 0.75rem;
+    }
+    .stat-card {
+        padding: 1rem;
+    }
 }
 
 .admin-table tbody tr:hover {

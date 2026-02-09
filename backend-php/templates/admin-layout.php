@@ -1,13 +1,22 @@
 <?php require_once __DIR__ . '/base.php'; ?>
+<script src="<?php echo base_url('assets/js/admin.js'); ?>" defer></script>
 
 <div class="flex min-h-screen">
+    <!-- Overlay movil -->
+    <div id="sidebarOverlay" class="fixed inset-0 bg-black/50 z-30 hidden md:hidden" onclick="toggleSidebar()"></div>
+
     <!-- Sidebar -->
-    <aside class="w-60 bg-klio-card border-r border-klio-border flex flex-col fixed h-full">
-        <div class="p-5 border-b border-klio-border">
-            <a href="<?php echo base_url('admin/dashboard.php'); ?>" class="text-lg font-bold text-klio-primary">KlioReader</a>
-            <div class="text-xs text-klio-muted mt-1">Panel de Administracion</div>
+    <aside id="sidebar" class="w-60 bg-klio-card border-r border-klio-border flex flex-col fixed h-full z-40 transition-transform duration-200 -translate-x-full md:translate-x-0">
+        <div class="p-5 border-b border-klio-border flex items-center justify-between">
+            <div>
+                <a href="<?php echo base_url('admin/dashboard.php'); ?>" class="text-lg font-bold text-klio-primary">KlioReader</a>
+                <div class="text-xs text-klio-muted mt-1">Panel de Administracion</div>
+            </div>
+            <button onclick="toggleSidebar()" class="md:hidden text-klio-muted hover:text-klio-text p-1">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
         </div>
-        <nav class="flex-1 p-4 space-y-1">
+        <nav class="flex-1 p-4 space-y-1 overflow-y-auto">
             <?php
             $currentPage = basename($_SERVER['SCRIPT_NAME']);
             $navItems = array(
@@ -19,7 +28,7 @@
             foreach ($navItems as $item):
                 $isActive = ($currentPage === $item[0]);
             ?>
-            <a href="<?php echo base_url('admin/' . $item[0]); ?>" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors <?php echo $isActive ? 'bg-klio-primary/15 text-klio-primary' : 'text-klio-muted hover:text-klio-text hover:bg-klio-elevated'; ?>">
+            <a href="<?php echo base_url('admin/' . $item[0]); ?>" onclick="closeSidebarMobile()" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors <?php echo $isActive ? 'bg-klio-primary/15 text-klio-primary' : 'text-klio-muted hover:text-klio-text hover:bg-klio-elevated'; ?>">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><?php echo $item[2]; ?></svg>
                 <?php echo $item[1]; ?>
             </a>
@@ -35,7 +44,15 @@
     </aside>
 
     <!-- Content -->
-    <main class="flex-1 ml-60 p-8">
+    <main class="flex-1 md:ml-60 p-4 md:p-8">
+        <!-- Header movil -->
+        <div class="flex items-center gap-3 mb-4 md:hidden">
+            <button onclick="toggleSidebar()" class="p-2 rounded-lg bg-klio-card border border-klio-border text-klio-muted hover:text-klio-text">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+            </button>
+            <span class="text-sm font-semibold text-klio-primary">KlioReader</span>
+        </div>
+
         <?php
         $flashSuccess = flash('success');
         $flashError = flash('error');

@@ -62,7 +62,7 @@ require_once __DIR__ . '/../templates/admin-layout.php';
 
 <div class="flex items-center gap-3 mb-6">
     <a href="<?php echo base_url('admin/users.php'); ?>" class="text-klio-muted hover:text-klio-text transition-colors">&larr;</a>
-    <h1 class="text-2xl font-bold">Editar Usuario</h1>
+    <h1 class="text-xl md:text-2xl font-bold">Editar Usuario</h1>
 </div>
 
 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">

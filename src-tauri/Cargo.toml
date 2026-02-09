@@ -29,4 +29,15 @@ base64 = "0.22"
 rand = "0.8"
 dirs = "5.0"
 tauri-plugin-dialog = "2"
+reqwest = { version = "0.12", features = ["json"] }
+hmac = "0.12"
+sha2 = "0.10"
+chrono = { version = "0.4", features = ["serde"] }
+tiny_http = "0.12"
+tokio = { version = "1", features = ["sync", "time", "macros"] }
+md-5 = "0.10"
+url = "2"
+hex = "0.4"
+async-trait = "0.1"
+open = "5"
 

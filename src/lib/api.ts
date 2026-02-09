@@ -109,6 +109,46 @@ export interface CloudBook {
   progress_percent: number;
   last_read: string | null;
   created_at: string;
+  stored_file_id: number | null;
+  is_duplicate: boolean;
+  share_count: number;
+}
+
+export interface SearchUser {
+  id: number;
+  username: string;
+  avatar: string | null;
+}
+
+export interface BookShare {
+  id: number;
+  book_id: number | null;
+  stored_file_id: number;
+  from_user_id: number;
+  to_user_id: number;
+  status: "pending" | "accepted" | "rejected";
+  message: string | null;
+  from_username: string;
+  from_avatar: string | null;
+  snap_title: string;
+  snap_author: string;
+  snap_description: string | null;
+  snap_cover_base64: string | null;
+  snap_file_name: string;
+  snap_file_size: number;
+  snap_file_type: string;
+  snap_total_chapters: number;
+  created_at: string;
+}
+
+export interface SharedUserProgress {
+  user_id: number;
+  username: string;
+  avatar: string | null;
+  progress_percent: number;
+  current_chapter: number;
+  current_page: number;
+  last_read: string | null;
 }
 
 export interface UserProfile extends AuthUser {
@@ -117,6 +157,8 @@ export interface UserProfile extends AuthUser {
   total_books: number;
   total_notes: number;
   total_bookmarks: number;
+  storage_used: number;
+  upload_limit: number;
   created_at: string;
 }
 
@@ -339,4 +381,38 @@ export async function addBookmark(
 
 export async function deleteBookmark(bookmarkId: number): Promise<void> {
   await request(`/api/bookmarks/${bookmarkId}`, { method: "DELETE" });
+}
+
+// ── Shares ──
+
+export async function searchUsers(q: string): Promise<SearchUser[]> {
+  return request<SearchUser[]>(`/api/users/search?q=${encodeURIComponent(q)}`);
+}
+
+export async function shareBook(bookId: number, toUserId: number, message?: string): Promise<{ ok: boolean; id: number }> {
+  return request(`/api/books/${bookId}/share`, {
+    method: "POST",
+    body: JSON.stringify({ to_user_id: toUserId, message: message || null }),
+  });
+}
+
+export async function getPendingShares(): Promise<BookShare[]> {
+  return request<BookShare[]>("/api/shares/pending");
+}
+
+export async function getPendingSharesCount(): Promise<number> {
+  const res = await request<{ count: number }>("/api/shares/pending/count");
+  return res.count;
+}
+
+export async function acceptShare(shareId: number): Promise<void> {
+  await request(`/api/shares/${shareId}/accept`, { method: "POST" });
+}
+
+export async function rejectShare(shareId: number): Promise<void> {
+  await request(`/api/shares/${shareId}/reject`, { method: "POST" });
+}
+
+export async function getSharedProgress(bookId: number): Promise<SharedUserProgress[]> {
+  return request<SharedUserProgress[]>(`/api/books/${bookId}/shared-progress`);
 }

@@ -59,9 +59,9 @@ $pageTitle = 'Configuracion';
 require_once __DIR__ . '/../templates/admin-layout.php';
 ?>
 
-<h1 class="text-2xl font-bold mb-6">Configuracion</h1>
+<h1 class="text-xl md:text-2xl font-bold mb-6">Configuracion</h1>
 
-<div class="bg-klio-card border border-klio-border rounded-xl p-6 max-w-2xl">
+<div class="bg-klio-card border border-klio-border rounded-xl p-4 md:p-6 max-w-2xl">
     <form method="POST" class="space-y-5">
         <?php echo csrf_field(); ?>
 
