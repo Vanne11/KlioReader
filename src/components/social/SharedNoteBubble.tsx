@@ -3,12 +3,14 @@ import { Button } from '@/components/ui/button';
 import type { SharedNote } from '@/types';
 import * as api from '@/lib/api';
 import { useRef, useState } from 'react';
+import { useT } from '@/i18n';
 
 interface Props {
   note: SharedNote;
 }
 
 export function SharedNoteBubble({ note }: Props) {
+  const { t } = useT();
   const [playing, setPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -38,7 +40,7 @@ export function SharedNoteBubble({ note }: Props) {
       {note.has_audio && (
         <Button size="sm" variant="ghost" className="h-6 text-[10px] gap-1 mt-1 px-2" onClick={playAudio}>
           <Volume2 className={`w-3 h-3 ${playing ? 'text-cyan-400 animate-pulse' : ''}`} />
-          {playing ? 'Reproduciendo...' : `${note.audio_duration || '?'}s`}
+          {playing ? t('sharedNote.playing') : `${note.audio_duration || '?'}s`}
         </Button>
       )}
     </div>

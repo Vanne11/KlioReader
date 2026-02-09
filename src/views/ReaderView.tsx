@@ -29,11 +29,13 @@ import { SharedNoteBubble } from '@/components/social/SharedNoteBubble';
 import { VoiceNoteRecorder } from '@/components/social/VoiceNoteRecorder';
 import { themeClasses, READER_FONTS } from '@/lib/constants';
 import * as api from '@/lib/api';
+import { useT } from '@/i18n';
 
 
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 export function ReaderView() {
+  const { t } = useT();
   const {
     currentBook, setCurrentBook, epubContent,
     fontSize, setFontSize, readerTheme, setReaderTheme,
@@ -156,23 +158,23 @@ export function ReaderView() {
           <Dialog>
             <DialogTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8 md:h-9 md:w-9 bg-black/20 rounded-full"><Settings2 className="w-4 h-4 md:w-5 md:h-5" /></Button></DialogTrigger>
             <DialogContent className="sm:max-w-[425px] bg-[#16161e] border-white/10 text-white">
-              <DialogHeader><DialogTitle>Ajustes de Lectura</DialogTitle></DialogHeader>
+              <DialogHeader><DialogTitle>{t('reader.readingSettings')}</DialogTitle></DialogHeader>
               <div className="py-6 space-y-8">
                 <div className="space-y-3">
-                  <p className="text-xs font-bold uppercase opacity-50 tracking-widest">Modo de Vista</p>
+                  <p className="text-xs font-bold uppercase opacity-50 tracking-widest">{t('reader.viewMode')}</p>
                   <div className="flex gap-2">
-                    <Button variant={readView === 'scroll' ? 'default' : 'secondary'} className="flex-1" onClick={() => setReadView('scroll')}><ScrollIcon className="w-4 h-4 mr-2" /> Scroll</Button>
-                    <Button variant={readView === 'paginated' ? 'default' : 'secondary'} className="flex-1" onClick={() => setReadView('paginated')}><Columns2 className="w-4 h-4 mr-2" /> Páginas</Button>
+                    <Button variant={readView === 'scroll' ? 'default' : 'secondary'} className="flex-1" onClick={() => setReadView('scroll')}><ScrollIcon className="w-4 h-4 mr-2" /> {t('reader.scroll')}</Button>
+                    <Button variant={readView === 'paginated' ? 'default' : 'secondary'} className="flex-1" onClick={() => setReadView('paginated')}><Columns2 className="w-4 h-4 mr-2" /> {t('reader.paginated')}</Button>
                   </div>
                   {readView === 'paginated' && (
                     <div className="flex gap-2 pt-2 border-t border-white/5 mt-2">
-                      <Button variant={pageColumns === 1 ? 'outline' : 'ghost'} className="flex-1 text-xs" onClick={() => setPageColumns(1)}><Square className="w-3 h-3 mr-2" /> 1 Columna</Button>
-                      <Button variant={pageColumns === 2 ? 'outline' : 'ghost'} className="flex-1 text-xs" onClick={() => setPageColumns(2)}><Columns2 className="w-3 h-3 mr-2" /> 2 Columnas</Button>
+                      <Button variant={pageColumns === 1 ? 'outline' : 'ghost'} className="flex-1 text-xs" onClick={() => setPageColumns(1)}><Square className="w-3 h-3 mr-2" /> {t('reader.oneColumn')}</Button>
+                      <Button variant={pageColumns === 2 ? 'outline' : 'ghost'} className="flex-1 text-xs" onClick={() => setPageColumns(2)}><Columns2 className="w-3 h-3 mr-2" /> {t('reader.twoColumns')}</Button>
                     </div>
                   )}
                 </div>
                 <div className="space-y-3">
-                  <p className="text-xs font-bold uppercase opacity-50 tracking-widest">Tipografía</p>
+                  <p className="text-xs font-bold uppercase opacity-50 tracking-widest">{t('reader.typography')}</p>
                   <div className="grid grid-cols-2 gap-2">
                     {READER_FONTS.map(font => (
                       <Button key={font} variant={readerFont === font ? 'outline' : 'ghost'} className="justify-start text-[10px] h-8 truncate" onClick={() => setReaderFont(font)} style={{ fontFamily: font }}>{font}</Button>
@@ -185,11 +187,11 @@ export function ReaderView() {
                   </div>
                 </div>
                 <div className="space-y-3">
-                  <p className="text-xs font-bold uppercase opacity-50 tracking-widest">Tema</p>
+                  <p className="text-xs font-bold uppercase opacity-50 tracking-widest">{t('reader.theme')}</p>
                   <div className="flex gap-2">
-                    <Button variant={readerTheme === 'light' ? 'outline' : 'ghost'} className="flex-1 bg-white text-black hover:bg-gray-100" onClick={() => setReaderTheme('light')}>Claro</Button>
-                    <Button variant={readerTheme === 'sepia' ? 'outline' : 'ghost'} className="flex-1 bg-[#f4ecd8] text-[#5b4636] hover:bg-[#ebe2cf]" onClick={() => setReaderTheme('sepia')}>Sepia</Button>
-                    <Button variant={readerTheme === 'dark' ? 'outline' : 'ghost'} className="flex-1 bg-[#1e1e2e] text-[#cdd6f4] hover:bg-[#252539]" onClick={() => setReaderTheme('dark')}>Oscuro</Button>
+                    <Button variant={readerTheme === 'light' ? 'outline' : 'ghost'} className="flex-1 bg-white text-black hover:bg-gray-100" onClick={() => setReaderTheme('light')}>{t('reader.light')}</Button>
+                    <Button variant={readerTheme === 'sepia' ? 'outline' : 'ghost'} className="flex-1 bg-[#f4ecd8] text-[#5b4636] hover:bg-[#ebe2cf]" onClick={() => setReaderTheme('sepia')}>{t('reader.sepia')}</Button>
+                    <Button variant={readerTheme === 'dark' ? 'outline' : 'ghost'} className="flex-1 bg-[#1e1e2e] text-[#cdd6f4] hover:bg-[#252539]" onClick={() => setReaderTheme('dark')}>{t('reader.dark')}</Button>
                   </div>
                 </div>
               </div>
@@ -199,23 +201,23 @@ export function ReaderView() {
             <>
               <Tooltip><TooltipTrigger asChild>
                 <Button variant="ghost" size="icon" className={`h-8 w-8 md:h-9 md:w-9 rounded-full ${showNotesPanel ? 'bg-primary/30 text-primary' : 'bg-black/20'}`} onClick={() => setShowNotesPanel(p => !p)}><StickyNote className="w-4 h-4 md:w-5 md:h-5" /></Button>
-              </TooltipTrigger><TooltipContent>Notas</TooltipContent></Tooltip>
+              </TooltipTrigger><TooltipContent>{t('reader.notes')}</TooltipContent></Tooltip>
               <Tooltip><TooltipTrigger asChild>
                 <Button variant="ghost" size="icon" className={`h-8 w-8 md:h-9 md:w-9 rounded-full ${readerBookmarks.some(b => b.chapter_index === currentBook.currentChapter && b.page_index === currentPageInChapter) ? 'bg-amber-500/30 text-amber-400' : 'bg-black/20'}`} onClick={addReaderBookmark}><BookmarkIcon className="w-4 h-4 md:w-5 md:h-5" /></Button>
-              </TooltipTrigger><TooltipContent>Marcar página</TooltipContent></Tooltip>
+              </TooltipTrigger><TooltipContent>{t('reader.bookmarkPage')}</TooltipContent></Tooltip>
             </>
           )}
           <Separator orientation="vertical" className="h-6 opacity-10 mx-1 md:mx-2 hidden md:block" />
           <div className="flex items-center gap-1 md:gap-2">
             <Button variant="ghost" size="icon" className="md:hidden h-8 w-8" onClick={() => changePage(-1)} disabled={currentBook.currentChapter === 0 && currentPageInChapter === 0}><ChevronLeft className="w-4 h-4" /></Button>
-            <Button variant="ghost" size="sm" className="hidden md:inline-flex" onClick={() => changePage(-1)} disabled={currentBook.currentChapter === 0 && currentPageInChapter === 0}>Anterior</Button>
+            <Button variant="ghost" size="sm" className="hidden md:inline-flex" onClick={() => changePage(-1)} disabled={currentBook.currentChapter === 0 && currentPageInChapter === 0}>{t('reader.previous')}</Button>
             <div className="text-[9px] md:text-[10px] font-bold px-2 md:px-3 py-1 bg-primary/10 rounded whitespace-nowrap">
               {readView === 'paginated' && currentBook.type === 'epub'
-                ? (isMobile ? `${currentPageInChapter + 1}/${totalPagesInChapter}` : `Pág ${currentPageInChapter + 1}/${totalPagesInChapter} · Cap ${currentBook.currentChapter + 1}/${currentBook.total_chapters}`)
+                ? (isMobile ? `${currentPageInChapter + 1}/${totalPagesInChapter}` : `${t('reader.page')} ${currentPageInChapter + 1}/${totalPagesInChapter} · ${t('reader.chapter')} ${currentBook.currentChapter + 1}/${currentBook.total_chapters}`)
                 : `${currentBook.currentChapter + 1} / ${currentBook.type === 'pdf' ? numPages : currentBook.total_chapters}`}
             </div>
             <Button variant="ghost" size="icon" className="md:hidden h-8 w-8" onClick={() => changePage(1)}><ChevronRight className="w-4 h-4" /></Button>
-            <Button variant="ghost" size="sm" className="hidden md:inline-flex" onClick={() => changePage(1)}>Siguiente</Button>
+            <Button variant="ghost" size="sm" className="hidden md:inline-flex" onClick={() => changePage(1)}>{t('reader.next')}</Button>
           </div>
           <Separator orientation="vertical" className="h-6 opacity-10 mx-1 md:mx-2 hidden md:block" />
           <Button variant="ghost" size="icon" className="hidden md:inline-flex" onClick={toggleFullscreen}>{isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}</Button>
@@ -267,10 +269,10 @@ export function ReaderView() {
             <div className="p-4 border-b border-white/10 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <button className={`text-xs font-bold px-2 py-1 rounded ${!showSharedNotes ? 'bg-primary/20 text-primary' : 'opacity-50'}`} onClick={() => setShowSharedNotes(false)}>
-                  <MessageSquare className="w-3.5 h-3.5 inline mr-1" />Mis Notas
+                  <MessageSquare className="w-3.5 h-3.5 inline mr-1" />{t('reader.myNotes')}
                 </button>
                 <button className={`text-xs font-bold px-2 py-1 rounded ${showSharedNotes ? 'bg-cyan-400/20 text-cyan-400' : 'opacity-50'}`} onClick={() => { setShowSharedNotes(true); if (cloudBookId) loadSharedNotes(cloudBookId); }}>
-                  <Users2 className="w-3.5 h-3.5 inline mr-1" />De Otros
+                  <Users2 className="w-3.5 h-3.5 inline mr-1" />{t('reader.fromOthers')}
                 </button>
               </div>
               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setShowNotesPanel(false)}><X className="w-4 h-4" /></Button>
@@ -279,14 +281,14 @@ export function ReaderView() {
             {!showSharedNotes ? (
               <>
                 <div className="p-4 border-b border-white/10 space-y-2">
-                  <textarea value={newNoteContent} onChange={e => setNewNoteContent(e.target.value)} placeholder="Escribe una nota para este capítulo..." rows={3} className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs focus:border-primary outline-none resize-none" />
+                  <textarea value={newNoteContent} onChange={e => setNewNoteContent(e.target.value)} placeholder={t('reader.notePlaceholder')} rows={3} className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs focus:border-primary outline-none resize-none" />
                   <div className="flex items-center justify-between">
                     <div className="flex gap-1">
                       {['#ffeb3b', '#ef5350', '#42a5f5', '#66bb6a', '#ab47bc'].map(c => (
                         <button key={c} className={`w-5 h-5 rounded-full border-2 ${newNoteColor === c ? 'border-white' : 'border-transparent'}`} style={{ backgroundColor: c }} onClick={() => setNewNoteColor(c)} />
                       ))}
                     </div>
-                    <Button size="sm" className="text-xs h-7" disabled={!newNoteContent.trim()} onClick={addReaderNote}><Plus className="w-3 h-3 mr-1" /> Nota</Button>
+                    <Button size="sm" className="text-xs h-7" disabled={!newNoteContent.trim()} onClick={addReaderNote}><Plus className="w-3 h-3 mr-1" /> {t('reader.note')}</Button>
                   </div>
                   {profile?.is_subscriber ? (
                     <VoiceNoteRecorder
@@ -307,7 +309,7 @@ export function ReaderView() {
                   <div className="p-4 space-y-3">
                     {readerBookmarks.filter(b => b.chapter_index === currentBook.currentChapter).length > 0 && (
                       <div className="space-y-2">
-                        <p className="text-[10px] font-bold uppercase opacity-40 tracking-widest">Marcadores</p>
+                        <p className="text-[10px] font-bold uppercase opacity-40 tracking-widest">{t('reader.bookmarks')}</p>
                         {readerBookmarks.filter(b => b.chapter_index === currentBook.currentChapter).map(bm => (
                           <div key={bm.id} className="flex items-center gap-2 bg-amber-500/10 rounded-lg px-3 py-2 group">
                             <BookmarkIcon className="w-3 h-3 text-amber-400 shrink-0" />
@@ -319,7 +321,7 @@ export function ReaderView() {
                     )}
                     {readerNotes.filter(n => n.chapter_index === currentBook.currentChapter).length > 0 && (
                       <div className="space-y-2">
-                        <p className="text-[10px] font-bold uppercase opacity-40 tracking-widest">Notas</p>
+                        <p className="text-[10px] font-bold uppercase opacity-40 tracking-widest">{t('reader.notes')}</p>
                         {readerNotes.filter(n => n.chapter_index === currentBook.currentChapter).map(note => (
                           <div key={note.id} className="rounded-lg px-3 py-2 group relative" style={{ backgroundColor: note.color + '15', borderLeft: `3px solid ${note.color}` }}>
                             {note.highlight_text && <p className="text-[10px] italic opacity-50 mb-1">"{note.highlight_text}"</p>}
@@ -328,7 +330,7 @@ export function ReaderView() {
                               <div className="flex items-center gap-1 mt-1 text-[10px] opacity-50"><Volume2 className="w-3 h-3" /> {note.audio_duration}s</div>
                             )}
                             <div className="absolute top-1 right-1 flex gap-0.5 opacity-0 group-hover:opacity-100">
-                              <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => toggleVisibility(note.id)} title={note.is_shared ? 'Hacer privada' : 'Compartir nota'}>
+                              <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => toggleVisibility(note.id)} title={note.is_shared ? t('reader.makePrivate') : t('reader.shareNote')}>
                                 {note.is_shared ? <Eye className="w-3 h-3 text-cyan-400" /> : <EyeOff className="w-3 h-3" />}
                               </Button>
                               <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => deleteReaderNote(note.id)}><X className="w-3 h-3" /></Button>
@@ -339,7 +341,7 @@ export function ReaderView() {
                     )}
                     {readerBookmarks.filter(b => b.chapter_index !== currentBook.currentChapter).length > 0 && (
                       <div className="space-y-2 pt-2 border-t border-white/5">
-                        <p className="text-[10px] font-bold uppercase opacity-40 tracking-widest">Otros capítulos</p>
+                        <p className="text-[10px] font-bold uppercase opacity-40 tracking-widest">{t('reader.otherChapters')}</p>
                         {readerBookmarks.filter(b => b.chapter_index !== currentBook.currentChapter).map(bm => (
                           <div key={bm.id} className="flex items-center gap-2 bg-white/5 rounded-lg px-3 py-2 group opacity-60">
                             <BookmarkIcon className="w-3 h-3 text-amber-400 shrink-0" />
@@ -352,7 +354,7 @@ export function ReaderView() {
                     {readerNotes.length === 0 && readerBookmarks.length === 0 && (
                       <div className="text-center py-8 opacity-30">
                         <StickyNote className="w-8 h-8 mx-auto mb-2" />
-                        <p className="text-xs">Sin notas ni marcadores</p>
+                        <p className="text-xs">{t('reader.noNotesOrBookmarks')}</p>
                       </div>
                     )}
                   </div>
@@ -361,7 +363,7 @@ export function ReaderView() {
             ) : (
               <ScrollArea className="flex-1">
                 <div className="p-4 space-y-3">
-                  <p className="text-[10px] font-bold uppercase opacity-40 tracking-widest">Notas compartidas - Cap. {currentBook.currentChapter + 1}</p>
+                  <p className="text-[10px] font-bold uppercase opacity-40 tracking-widest">{t('reader.sharedNotes', { chapter: currentBook.currentChapter + 1 })}</p>
                   {sharedNotes.filter(n => n.chapter_index === currentBook.currentChapter).length > 0 ? (
                     sharedNotes.filter(n => n.chapter_index === currentBook.currentChapter).map(note => (
                       <SharedNoteBubble key={note.id} note={note} />
@@ -369,12 +371,12 @@ export function ReaderView() {
                   ) : (
                     <div className="text-center py-8 opacity-30">
                       <Users2 className="w-8 h-8 mx-auto mb-2" />
-                      <p className="text-xs">Sin notas compartidas en este capítulo</p>
+                      <p className="text-xs">{t('reader.noSharedNotes')}</p>
                     </div>
                   )}
                   {sharedNotes.filter(n => n.chapter_index !== currentBook.currentChapter).length > 0 && (
                     <div className="space-y-2 pt-2 border-t border-white/5">
-                      <p className="text-[10px] font-bold uppercase opacity-40 tracking-widest">Otros capítulos</p>
+                      <p className="text-[10px] font-bold uppercase opacity-40 tracking-widest">{t('reader.otherChapters')}</p>
                       {sharedNotes.filter(n => n.chapter_index !== currentBook.currentChapter).map(note => (
                         <SharedNoteBubble key={note.id} note={note} />
                       ))}

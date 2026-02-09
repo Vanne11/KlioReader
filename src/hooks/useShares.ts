@@ -98,6 +98,11 @@ export function useShares() {
     } catch {}
   }
 
+  async function loadAllSharedProgress(books: CloudBook[]) {
+    const shared = books.filter(b => b.share_count > 0);
+    await Promise.all(shared.map(b => loadSharedProgress(b.id)));
+  }
+
   function toggleShareProgress(bookId: number) {
     if (expandedShareProgress === bookId) {
       setExpandedShareProgress(null);
@@ -111,6 +116,6 @@ export function useShares() {
     loadPendingSharesCount, loadPendingShares,
     handleAcceptShare, handleRejectShare,
     handleShareSearch, handleSendShare, openShareDialog,
-    loadSharedProgress, toggleShareProgress,
+    loadSharedProgress, loadAllSharedProgress, toggleShareProgress,
   };
 }

@@ -2,8 +2,10 @@ import { AlertTriangle, CheckCircle2, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useUIStore } from '@/stores/uiStore';
+import { useT } from '@/i18n';
 
 export function AlertModal() {
+  const { t } = useT();
   const alertModal = useUIStore(s => s.alertModal);
   const setAlertModal = useUIStore(s => s.setAlertModal);
 
@@ -25,7 +27,7 @@ export function AlertModal() {
             variant={alertModal?.type === 'info' ? 'default' : 'ghost'}
             onClick={() => setAlertModal(null)}
           >
-            Aceptar
+            {t('app.accept')}
           </Button>
         </div>
       </DialogContent>

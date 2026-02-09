@@ -1,6 +1,7 @@
 import { Trophy, User, Clock } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import type { RaceLeaderboardResponse } from '@/types';
+import { useT } from '@/i18n';
 
 interface Props {
   data: RaceLeaderboardResponse;
@@ -8,6 +9,7 @@ interface Props {
 }
 
 export function RaceLeaderboard({ data, currentUserId }: Props) {
+  const { t } = useT();
   const { race, leaderboard } = data;
 
   const getMedal = (index: number) => {
@@ -22,10 +24,10 @@ export function RaceLeaderboard({ data, currentUserId }: Props) {
       <div className="flex items-center justify-between">
         <h4 className="text-xs font-bold flex items-center gap-1.5">
           <Trophy className="w-3.5 h-3.5 text-yellow-400" />
-          Carrera de Lectura
+          {t('raceLeaderboard.readingRace')}
         </h4>
         <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${race.status === 'active' ? 'bg-green-500/20 text-green-400' : 'bg-white/10 text-white/50'}`}>
-          {race.status === 'active' ? 'En curso' : 'Finalizada'}
+          {race.status === 'active' ? t('raceLeaderboard.active') : t('raceLeaderboard.finished')}
         </span>
       </div>
       <div className="space-y-1.5">
@@ -36,7 +38,7 @@ export function RaceLeaderboard({ data, currentUserId }: Props) {
               <User className="w-3 h-3 text-primary" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-[10px] font-bold truncate">{entry.username}{entry.user_id === currentUserId ? ' (tú)' : ''}</p>
+              <p className="text-[10px] font-bold truncate">{entry.username}{entry.user_id === currentUserId ? ` ${t('raceLeaderboard.you')}` : ''}</p>
               <div className="flex items-center gap-2 mt-0.5">
                 <Progress value={entry.progress_percent} className="h-1 flex-1 max-w-[100px] bg-white/5" indicatorClassName={entry.finished_at ? 'bg-green-400' : 'bg-primary'} />
                 <span className="text-[9px] font-bold text-primary">{entry.progress_percent}%</span>

@@ -7,8 +7,10 @@ import { Separator } from "@/components/ui/separator";
 import { useReaderStore } from '@/stores/readerStore';
 import { useReader } from '@/hooks/useReader';
 import { coverSrc } from '@/lib/utils';
+import { useT } from '@/i18n';
 
 export function BookDetailView() {
+  const { t } = useT();
   const selectedBook = useReaderStore(s => s.selectedBook);
   const { setSelectedBook } = useReaderStore();
   const { readBook } = useReader();
@@ -25,16 +27,16 @@ export function BookDetailView() {
       <header className="h-16 md:h-20 border-b border-white/5 flex items-center justify-between px-4 md:px-12 bg-[#16161e]/40 backdrop-blur-xl z-50">
         <Button variant="ghost" onClick={() => setSelectedBook(null)} className="gap-2 hover:bg-white/5 group transition-all">
           <ChevronLeft className="w-5 h-5 group-hover:-translate-x-1 transition-transform" />
-          <span className="font-bold tracking-tight text-sm">BIBLIOTECA</span>
+          <span className="font-bold tracking-tight text-sm">{t('bookDetail.library')}</span>
         </Button>
         <div className="flex items-center gap-6">
           <div className="text-right hidden sm:block">
-            <p className="text-[10px] font-bold opacity-40 uppercase tracking-[0.2em] mb-0.5">Estado</p>
-            <p className="text-xs font-black text-amber-400 uppercase">{selectedBook.progress === 0 ? 'Sin empezar' : `Leído ${selectedBook.progress}%`}</p>
+            <p className="text-[10px] font-bold opacity-40 uppercase tracking-[0.2em] mb-0.5">{t('bookDetail.status')}</p>
+            <p className="text-xs font-black text-amber-400 uppercase">{selectedBook.progress === 0 ? t('bookDetail.notStarted') : t('bookDetail.readPercent', { percent: selectedBook.progress })}</p>
           </div>
           <Button onClick={() => readBook(selectedBook)} className="gap-2 md:gap-3 bg-primary hover:bg-primary/90 text-primary-foreground font-black px-6 py-4 md:px-10 md:py-6 rounded-full shadow-[0_10px_30px_rgba(var(--primary),0.3)] hover:scale-105 transition-all active:scale-95">
             <Play className="w-5 h-5 fill-current" />
-            <span className="tracking-widest uppercase">Leer Libro</span>
+            <span className="tracking-widest uppercase">{t('bookDetail.readBook')}</span>
           </Button>
         </div>
       </header>
@@ -55,21 +57,21 @@ export function BookDetailView() {
               <div className="mt-12 space-y-6 bg-white/5 p-8 rounded-2xl border border-white/5 backdrop-blur-md">
                 <div className="flex justify-between items-end">
                   <div className="space-y-1">
-                    <p className="text-[10px] font-black opacity-30 uppercase tracking-widest">Tu Progreso</p>
+                    <p className="text-[10px] font-black opacity-30 uppercase tracking-widest">{t('bookDetail.yourProgress')}</p>
                     <p className="text-2xl font-black">{selectedBook.progress}%</p>
                   </div>
                   <Badge variant="outline" className="border-primary/30 text-primary text-[10px] px-3 py-1 font-bold">{selectedBook.type.toUpperCase()}</Badge>
                 </div>
                 <Progress value={selectedBook.progress} className="h-2.5 bg-white/5" indicatorClassName="bg-gradient-to-r from-amber-600 to-amber-400 shadow-[0_0_15px_rgba(251,191,36,0.4)]" />
                 <div className="flex justify-between text-[10px] font-bold opacity-30 uppercase tracking-tighter">
-                  <span>{selectedBook.currentChapter} {selectedBook.type === 'pdf' ? 'páginas' : 'capítulos'} leídos</span>
-                  <span>{selectedBook.total_chapters} total</span>
+                  <span>{selectedBook.type === 'pdf' ? t('bookDetail.pagesRead', { count: selectedBook.currentChapter }) : t('bookDetail.chaptersRead', { count: selectedBook.currentChapter })}</span>
+                  <span>{t('bookDetail.total', { count: selectedBook.total_chapters })}</span>
                 </div>
               </div>
             </div>
             <div className="flex-1 space-y-12">
               <div className="space-y-4">
-                <Badge className="bg-primary/10 text-primary hover:bg-primary/20 border-none px-4 py-1.5 rounded-full text-[10px] font-black tracking-widest uppercase">Información del libro</Badge>
+                <Badge className="bg-primary/10 text-primary hover:bg-primary/20 border-none px-4 py-1.5 rounded-full text-[10px] font-black tracking-widest uppercase">{t('bookDetail.bookInfo')}</Badge>
                 <h1 className="text-3xl md:text-5xl lg:text-7xl font-black leading-[1.1] tracking-tight text-white drop-shadow-2xl">{selectedBook.title}</h1>
                 <div className="flex items-center gap-4 pt-2">
                   <div className="w-12 h-0.5 bg-primary/50" />
@@ -77,16 +79,16 @@ export function BookDetailView() {
                 </div>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-8">
-                <div className="space-y-1"><p className="text-[10px] font-black opacity-30 uppercase tracking-widest">Formato</p><p className="text-lg font-bold uppercase">{selectedBook.type}</p></div>
-                <div className="space-y-1"><p className="text-[10px] font-black opacity-30 uppercase tracking-widest">Extensión</p><p className="text-lg font-bold">{selectedBook.total_chapters} {selectedBook.type === 'pdf' ? 'Páginas' : 'Capítulos'}</p></div>
-                <div className="space-y-1"><p className="text-[10px] font-black opacity-30 uppercase tracking-widest">Última vez</p><p className="text-lg font-bold truncate">{selectedBook.lastRead}</p></div>
+                <div className="space-y-1"><p className="text-[10px] font-black opacity-30 uppercase tracking-widest">{t('bookDetail.format')}</p><p className="text-lg font-bold uppercase">{selectedBook.type}</p></div>
+                <div className="space-y-1"><p className="text-[10px] font-black opacity-30 uppercase tracking-widest">{t('bookDetail.extension')}</p><p className="text-lg font-bold">{selectedBook.total_chapters} {selectedBook.type === 'pdf' ? t('bookDetail.pages') : t('bookDetail.chapters')}</p></div>
+                <div className="space-y-1"><p className="text-[10px] font-black opacity-30 uppercase tracking-widest">{t('bookDetail.lastTime')}</p><p className="text-lg font-bold truncate">{selectedBook.lastRead}</p></div>
               </div>
               <Separator className="opacity-10" />
               <div className="space-y-6">
-                <div className="flex items-center gap-3"><List className="w-5 h-5 text-primary/60" /><h3 className="text-sm font-black uppercase tracking-[0.2em] opacity-50">Sinopsis</h3></div>
+                <div className="flex items-center gap-3"><List className="w-5 h-5 text-primary/60" /><h3 className="text-sm font-black uppercase tracking-[0.2em] opacity-50">{t('bookDetail.synopsis')}</h3></div>
                 {selectedBook.description
                   ? <div className="text-xl leading-[1.8] text-white/70 font-serif max-w-3xl selection:bg-primary/30 [&>p:first-of-type]:first-letter:text-5xl [&>p:first-of-type]:first-letter:font-black [&>p:first-of-type]:first-letter:mr-3 [&>p:first-of-type]:first-letter:float-left [&>p:first-of-type]:first-letter:text-primary [&>p]:mb-4 [&_b]:font-bold [&_i]:italic [&_a]:text-primary [&_a]:underline" dangerouslySetInnerHTML={{ __html: selectedBook.description }} />
-                  : <div className="text-xl leading-[1.8] text-white/70 font-serif max-w-3xl selection:bg-primary/30 first-letter:text-5xl first-letter:font-black first-letter:mr-3 first-letter:float-left first-letter:text-primary">No hay una descripción disponible para este libro en sus metadatos. Puedes editar la información del libro para añadir una sinopsis personalizada.</div>
+                  : <div className="text-xl leading-[1.8] text-white/70 font-serif max-w-3xl selection:bg-primary/30 first-letter:text-5xl first-letter:font-black first-letter:mr-3 first-letter:float-left first-letter:text-primary">{t('bookDetail.noDescription')}</div>
                 }
               </div>
             </div>

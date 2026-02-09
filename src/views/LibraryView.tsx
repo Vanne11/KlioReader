@@ -18,8 +18,10 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useLibrary } from '@/hooks/useLibrary';
 import { coverSrc } from '@/lib/utils';
+import { useT } from '@/i18n';
 
 export function LibraryView() {
+  const { t } = useT();
   const books = useLibraryStore(s => s.books);
   const libraryPath = useLibraryStore(s => s.libraryPath);
   const libraryView = useLibraryStore(s => s.libraryView);
@@ -40,13 +42,13 @@ export function LibraryView() {
     <>
       <header className="h-14 md:h-16 border-b border-white/5 flex items-center justify-between px-4 md:px-8 bg-[#16161e]/50 backdrop-blur-md">
         <div className="flex items-center gap-2 md:gap-4 pl-10 md:pl-0">
-          <div className="flex items-center gap-1.5 md:gap-2 text-orange-400 font-bold"><Flame className="w-4 h-4 md:w-5 md:h-5 fill-current" /> {stats.streak} <span className="hidden md:inline">Días</span></div>
+          <div className="flex items-center gap-1.5 md:gap-2 text-orange-400 font-bold"><Flame className="w-4 h-4 md:w-5 md:h-5 fill-current" /> {stats.streak} <span className="hidden md:inline">{t('library.days')}</span></div>
           <Separator orientation="vertical" className="h-6 opacity-10" />
           <div className="flex items-center bg-black/20 rounded-lg p-1">
-            <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className={`h-8 w-8 ${libraryView === 'grid-large' ? 'bg-white/10 text-primary' : 'opacity-50'}`} onClick={() => setLibraryView('grid-large')}><LayoutGrid className="w-4 h-4" /></Button></TooltipTrigger><TooltipContent>Cuadrícula Gigante</TooltipContent></Tooltip>
-            <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className={`h-8 w-8 ${libraryView === 'grid-mini' ? 'bg-white/10 text-primary' : 'opacity-50'}`} onClick={() => setLibraryView('grid-mini')}><Grid2X2 className="w-4 h-4" /></Button></TooltipTrigger><TooltipContent>Miniaturas</TooltipContent></Tooltip>
-            <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className={`h-8 w-8 ${libraryView === 'grid-card' ? 'bg-white/10 text-primary' : 'opacity-50'}`} onClick={() => setLibraryView('grid-card')}><Square className="w-4 h-4" /></Button></TooltipTrigger><TooltipContent>Tarjetas</TooltipContent></Tooltip>
-            <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className={`h-8 w-8 ${libraryView === 'list-info' ? 'bg-white/10 text-primary' : 'opacity-50'}`} onClick={() => setLibraryView('list-info')}><List className="w-4 h-4" /></Button></TooltipTrigger><TooltipContent>Lista Detallada</TooltipContent></Tooltip>
+            <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className={`h-8 w-8 ${libraryView === 'grid-large' ? 'bg-white/10 text-primary' : 'opacity-50'}`} onClick={() => setLibraryView('grid-large')}><LayoutGrid className="w-4 h-4" /></Button></TooltipTrigger><TooltipContent>{t('library.gridLarge')}</TooltipContent></Tooltip>
+            <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className={`h-8 w-8 ${libraryView === 'grid-mini' ? 'bg-white/10 text-primary' : 'opacity-50'}`} onClick={() => setLibraryView('grid-mini')}><Grid2X2 className="w-4 h-4" /></Button></TooltipTrigger><TooltipContent>{t('library.gridMini')}</TooltipContent></Tooltip>
+            <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className={`h-8 w-8 ${libraryView === 'grid-card' ? 'bg-white/10 text-primary' : 'opacity-50'}`} onClick={() => setLibraryView('grid-card')}><Square className="w-4 h-4" /></Button></TooltipTrigger><TooltipContent>{t('library.gridCard')}</TooltipContent></Tooltip>
+            <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className={`h-8 w-8 ${libraryView === 'list-info' ? 'bg-white/10 text-primary' : 'opacity-50'}`} onClick={() => setLibraryView('list-info')}><List className="w-4 h-4" /></Button></TooltipTrigger><TooltipContent>{t('library.listInfo')}</TooltipContent></Tooltip>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -54,9 +56,9 @@ export function LibraryView() {
             <Tooltip><TooltipTrigger asChild>
               <div className="flex items-center gap-1.5 text-amber-400 text-xs font-bold bg-amber-400/10 px-2.5 py-1.5 rounded-lg">
                 <Loader2 className="w-3 h-3 animate-spin" />
-                <span>{queueSummary || `${queueCount} pendiente(s)`}</span>
+                <span>{queueSummary || t('library.pending', { count: queueCount })}</span>
               </div>
-            </TooltipTrigger><TooltipContent>{queueCount} en cola: {queueSummary}</TooltipContent></Tooltip>
+            </TooltipTrigger><TooltipContent>{t('library.inQueue', { count: queueCount, summary: queueSummary })}</TooltipContent></Tooltip>
           )}
         </div>
       </header>
@@ -65,12 +67,12 @@ export function LibraryView() {
           <div className="flex flex-col items-center justify-center py-32 space-y-6">
             <FolderOpen className="w-16 h-16 opacity-15" />
             <div className="text-center space-y-2">
-              <p className="text-lg font-bold opacity-60">{isMobile ? 'Biblioteca vacía' : 'Sin carpeta de biblioteca'}</p>
-              <p className="text-sm opacity-30 max-w-md">{isMobile ? 'Descarga libros desde la nube para empezar a leer.' : 'Configura una carpeta donde tengas tus libros (EPUB, PDF) para empezar a leer.'}</p>
+              <p className="text-lg font-bold opacity-60">{isMobile ? t('library.emptyTitle') : t('library.emptyTitleDesktop')}</p>
+              <p className="text-sm opacity-30 max-w-md">{isMobile ? t('library.emptyDesc') : t('library.emptyDescDesktop')}</p>
             </div>
             {!isMobile && (
               <Button className="gap-2 font-bold" onClick={() => { setActiveTab('settings'); setSettingsTab('folder'); }}>
-                <Settings2 className="w-4 h-4" /> Ir a Configuración
+                <Settings2 className="w-4 h-4" /> {t('library.goToSettings')}
               </Button>
             )}
           </div>
@@ -97,7 +99,7 @@ export function LibraryView() {
                         )}
                         <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black via-black/80 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-20">
                           <Progress value={book.progress} className="h-1.5 bg-white/20" indicatorClassName="bg-amber-400" />
-                          <p className="mt-2 text-[9px] font-black text-amber-400 tracking-tighter">{book.progress}% LEÍDO</p>
+                          <p className="mt-2 text-[9px] font-black text-amber-400 tracking-tighter">{book.progress}% {t('library.read')}</p>
                         </div>
                       </div>
                       <div className="p-6 bg-[#1c1c26] border-t border-white/5 relative z-30">
@@ -172,23 +174,23 @@ export function LibraryView() {
 
       <Dialog open={!!editingLocalBook} onOpenChange={(open) => { if (!open) setEditingLocalBook(null); }}>
         <DialogContent className="sm:max-w-[425px] bg-[#16161e] border-white/10 text-white">
-          <DialogHeader><DialogTitle>Editar Libro</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t('library.editBook')}</DialogTitle></DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <label className="text-xs font-bold uppercase opacity-50 tracking-widest">Título</label>
+              <label className="text-xs font-bold uppercase opacity-50 tracking-widest">{t('library.title')}</label>
               <input value={editLocalForm.title} onChange={e => updateEditLocalForm({ title: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-sm focus:border-primary outline-none" />
             </div>
             <div className="space-y-2">
-              <label className="text-xs font-bold uppercase opacity-50 tracking-widest">Autor</label>
+              <label className="text-xs font-bold uppercase opacity-50 tracking-widest">{t('library.author')}</label>
               <input value={editLocalForm.author} onChange={e => updateEditLocalForm({ author: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-sm focus:border-primary outline-none" />
             </div>
             <div className="space-y-2">
-              <label className="text-xs font-bold uppercase opacity-50 tracking-widest">Descripción</label>
-              <textarea value={editLocalForm.description} onChange={e => updateEditLocalForm({ description: e.target.value })} rows={3} className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-sm focus:border-primary outline-none resize-y font-sans" placeholder="Sinopsis o descripción..." />
+              <label className="text-xs font-bold uppercase opacity-50 tracking-widest">{t('library.description')}</label>
+              <textarea value={editLocalForm.description} onChange={e => updateEditLocalForm({ description: e.target.value })} rows={3} className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-sm focus:border-primary outline-none resize-y font-sans" placeholder={t('library.descPlaceholder')} />
             </div>
             <div className="flex gap-2 pt-2">
-              <Button variant="outline" className="flex-1 border-white/10" onClick={() => setEditingLocalBook(null)}>Cancelar</Button>
-              <Button className="flex-1 font-bold" onClick={saveLocalBookEdit}>Guardar</Button>
+              <Button variant="outline" className="flex-1 border-white/10" onClick={() => setEditingLocalBook(null)}>{t('app.cancel')}</Button>
+              <Button className="flex-1 font-bold" onClick={saveLocalBookEdit}>{t('app.save')}</Button>
             </div>
           </div>
         </DialogContent>

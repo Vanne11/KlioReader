@@ -13,6 +13,7 @@ import { GamificationView } from '@/views/GamificationView';
 import { SettingsView } from '@/views/SettingsView';
 import { AppShell } from '@/components/layout/AppShell';
 import { AlertModal } from '@/components/shared/AlertModal';
+import { LanguageModal } from '@/components/shared/LanguageModal';
 import "./App.css";
 
 function App() {
@@ -30,6 +31,7 @@ function App() {
       <TooltipProvider>
         <ReaderView />
         <AlertModal />
+        <LanguageModal />
       </TooltipProvider>
     );
   }
@@ -39,6 +41,7 @@ function App() {
       <TooltipProvider>
         <BookDetailView />
         <AlertModal />
+        <LanguageModal />
       </TooltipProvider>
     );
   }
@@ -52,6 +55,7 @@ function App() {
         {activeTab === 'settings' && <SettingsView />}
       </AppShell>
       <AlertModal />
+      <LanguageModal />
     </TooltipProvider>
   );
 }

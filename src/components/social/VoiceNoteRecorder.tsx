@@ -1,5 +1,6 @@
 import { Mic, Square, Play, Pause, Trash2, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useT } from '@/i18n';
 
 interface Props {
   isRecording: boolean;
@@ -15,6 +16,7 @@ interface Props {
 }
 
 export function VoiceNoteRecorder({ isRecording, recordingTime, audioUrl, isPlaying, onStart, onStop, onDiscard, onPlay, onStopPlay, onUpload }: Props) {
+  const { t } = useT();
   return (
     <div className="flex items-center gap-2 bg-white/5 rounded-lg px-3 py-2">
       {!audioUrl ? (
@@ -32,7 +34,7 @@ export function VoiceNoteRecorder({ isRecording, recordingTime, audioUrl, isPlay
             </>
           ) : (
             <Button size="sm" variant="ghost" className="h-7 text-xs gap-1.5 text-primary" onClick={onStart}>
-              <Mic className="w-3.5 h-3.5" /> Nota de voz
+              <Mic className="w-3.5 h-3.5" /> {t('voiceNote.voiceNote')}
             </Button>
           )}
         </>

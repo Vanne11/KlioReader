@@ -1,7 +1,9 @@
 // KlioReader API Client
 // Conecta la app de escritorio con el backend PHP
 
-const API_URL = localStorage.getItem("apiUrl") || "http://localhost:8000";
+import config from "../../config.json";
+
+const API_URL = localStorage.getItem("apiUrl") || config.apiUrl;
 
 function getToken(): string | null {
   return localStorage.getItem("authToken");
@@ -27,7 +29,7 @@ export function setApiUrl(url: string): void {
 }
 
 export function getApiUrl(): string {
-  return localStorage.getItem("apiUrl") || "http://localhost:8000";
+  return localStorage.getItem("apiUrl") || config.apiUrl;
 }
 
 async function request<T>(

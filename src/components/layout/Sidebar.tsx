@@ -18,12 +18,14 @@ import { useSocialStore } from '@/stores/socialStore';
 import { useAuth } from '@/hooks/useAuth';
 import { useShares } from '@/hooks/useShares';
 import { getUserTitle, getBadgeImageUrl, RARITY_CONFIG } from '@/lib/gamification';
+import { useT } from '@/i18n';
 
 interface SidebarProps {
   onClose?: () => void;
 }
 
 export function Sidebar({ onClose }: SidebarProps) {
+  const { t, badge: badgeT } = useT();
   const { activeTab, setActiveTab } = useUIStore();
   const authUser = useAuthStore(s => s.authUser);
   const profile = useAuthStore(s => s.profile);
@@ -56,13 +58,13 @@ export function Sidebar({ onClose }: SidebarProps) {
         )}
       </div>
       <nav className="flex-1 px-4 space-y-1">
-        <Button variant={activeTab === "library" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => navigate("library")}><Library className="w-5 h-5 text-primary" /> Biblioteca</Button>
+        <Button variant={activeTab === "library" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => navigate("library")}><Library className="w-5 h-5 text-primary" /> {t('sidebar.library')}</Button>
         <Button variant={activeTab === "cloud" ? "secondary" : "ghost"} className="w-full justify-start gap-3 relative" onClick={() => { navigate("cloud"); if (pendingSharesCount > 0) loadPendingShares(); }}>
-          <Cloud className="w-5 h-5 text-blue-400" /> Nube
+          <Cloud className="w-5 h-5 text-blue-400" /> {t('sidebar.cloud')}
           {(pendingSharesCount + pendingChallengesCount) > 0 && <span className="absolute right-2 top-1/2 -translate-y-1/2 bg-red-500 text-white text-[9px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">{pendingSharesCount + pendingChallengesCount}</span>}
         </Button>
-        <Button variant={activeTab === "gamification" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => navigate("gamification")}><Trophy className="w-5 h-5 text-yellow-500" /> Mi Progreso</Button>
-        <Button variant={activeTab === "settings" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => navigate("settings")}><Settings2 className="w-5 h-5 text-zinc-400" /> Configuración</Button>
+        <Button variant={activeTab === "gamification" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => navigate("gamification")}><Trophy className="w-5 h-5 text-yellow-500" /> {t('sidebar.myProgress')}</Button>
+        <Button variant={activeTab === "settings" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => navigate("settings")}><Settings2 className="w-5 h-5 text-zinc-400" /> {t('sidebar.settings')}</Button>
       </nav>
       <div className="p-6 mt-auto border-t border-white/5">
         {authUser ? (
@@ -71,13 +73,13 @@ export function Sidebar({ onClose }: SidebarProps) {
               <User className="w-4 h-4 text-primary" />
               <span className="text-xs font-bold truncate">{authUser.username}</span>
               {profile?.is_subscriber ? (
-                <Tooltip><TooltipTrigger asChild><Crown className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" /></TooltipTrigger><TooltipContent>Suscriptor KlioReader Cloud</TooltipContent></Tooltip>
+                <Tooltip><TooltipTrigger asChild><Crown className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" /></TooltipTrigger><TooltipContent>{t('sidebar.subscriberTooltip')}</TooltipContent></Tooltip>
               ) : null}
             </div>
-            <Button variant="ghost" size="sm" className="w-full justify-start text-xs opacity-50" onClick={handleLogout}><LogOut className="w-3 h-3 mr-2" /> Cerrar Sesión</Button>
+            <Button variant="ghost" size="sm" className="w-full justify-start text-xs opacity-50" onClick={handleLogout}><LogOut className="w-3 h-3 mr-2" /> {t('sidebar.logout')}</Button>
           </div>
         ) : (
-          <Button variant="outline" size="sm" className="w-full text-xs border-white/10" onClick={() => navigate('cloud')}><LogIn className="w-3 h-3 mr-2" /> Iniciar Sesión</Button>
+          <Button variant="outline" size="sm" className="w-full text-xs border-white/10" onClick={() => navigate('cloud')}><LogIn className="w-3 h-3 mr-2" /> {t('sidebar.login')}</Button>
         )}
         {storageConfigured && (
           <div className="my-2">
@@ -105,25 +107,26 @@ export function Sidebar({ onClose }: SidebarProps) {
                     <HardDrive className="w-3 h-3" />
                   )}
                   <span className="truncate font-medium">
-                    {syncStatus.syncing ? 'Sincronizando...' : syncStatus.error ? 'Error sync' : syncStatus.last_sync ? 'Sync OK' : 'Storage'}
+                    {syncStatus.syncing ? t('sidebar.syncSyncing') : syncStatus.error ? t('sidebar.syncError') : syncStatus.last_sync ? t('sidebar.syncOk') : t('sidebar.syncStorage')}
                   </span>
                 </button>
               </TooltipTrigger>
               <TooltipContent>
-                {syncStatus.syncing ? 'Sincronización en curso...' : syncStatus.error ? `Error: ${syncStatus.error}` : syncStatus.last_sync ? `Último sync: ${new Date(syncStatus.last_sync).toLocaleString()}` : 'Storage de usuario configurado'}
+                {syncStatus.syncing ? t('sidebar.syncTooltipSyncing') : syncStatus.error ? t('sidebar.syncTooltipError', { error: syncStatus.error }) : syncStatus.last_sync ? t('sidebar.syncTooltipOk', { date: new Date(syncStatus.last_sync).toLocaleString() }) : t('sidebar.syncTooltipConfigured')}
               </TooltipContent>
             </Tooltip>
           </div>
         )}
         <Separator className="my-3 opacity-10" />
         <div className="space-y-1">
-          <Badge variant="outline" className="border-accent text-accent font-bold">Nivel {stats.level}</Badge>
+          <Badge variant="outline" className="border-accent text-accent font-bold">{t('sidebar.level', { level: stats.level })}</Badge>
           {userTitle && (() => {
             const rc = RARITY_CONFIG[userTitle.rarity];
+            const translated = badgeT(userTitle.id);
             return (
               <div className="flex items-center gap-1.5">
                 <img src={getBadgeImageUrl(userTitle.id)} alt="" className="w-5 h-5 object-contain" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                <span className={`text-[10px] font-bold italic truncate ${rc.text}`}>"{userTitle.name}"</span>
+                <span className={`text-[10px] font-bold italic truncate ${rc.text}`}>"{translated.name}"</span>
               </div>
             );
           })()}
