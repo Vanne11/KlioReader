@@ -6,7 +6,7 @@ import {
   ZoomIn, ZoomOut,
   Scroll as ScrollIcon, Columns2, Square, Maximize, Minimize,
   LayoutGrid, Grid2X2, List, Settings2,
-  Cloud, CloudUpload, CloudDownload, LogIn, LogOut, User, Loader2, Server, Trash2, Pencil,
+  Cloud, CloudUpload, CloudDownload, LogIn, LogOut, User, Loader2, Server, Trash2, Pencil, FolderOpen,
   Play, ChevronLeft, AlertTriangle, CheckCircle2, Info,
   StickyNote, Bookmark as BookmarkIcon, Plus, MessageSquare
 } from "lucide-react";
@@ -27,6 +27,7 @@ import {
   calculateLevel, getAllBadgesWithStatus, getUnlockedBadges, getUserTitle, getBadgeImageUrl, xpForNextLevel,
 } from "@/lib/gamification";
 import * as api from "@/lib/api";
+import * as syncQueue from "@/lib/syncQueue";
 
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
@@ -83,6 +84,8 @@ const EpubImage = ({ src, bookPath }: { src: string, bookPath: string }) => {
 function App() {
   const [activeTab, setActiveTab] = useState("library");
   const [books, setBooks] = useState<Book[]>([]);
+  const [booksLoaded, setBooksLoaded] = useState(false);
+  const booksRef = useRef<Book[]>([]);
   const [currentBook, setCurrentBook] = useState<Book | null>(null);
   const [selectedBook, setSelectedBook] = useState<Book | null>(null);
   const [epubContent, setEpubContent] = useState<string>("");
@@ -108,8 +111,8 @@ function App() {
   const [editingLocalBook, setEditingLocalBook] = useState<Book | null>(null);
   const [editLocalForm, setEditLocalForm] = useState({ title: '', author: '', description: '' });
   const [alertModal, setAlertModal] = useState<{ title: string; message: string; type: 'error' | 'success' | 'info' } | null>(null);
-  const [uploadingBookId, setUploadingBookId] = useState<string | null>(null);
   const [downloadingBookId, setDownloadingBookId] = useState<number | null>(null);
+  const [queueCount, setQueueCount] = useState(syncQueue.getQueueCount());
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [profile, setProfile] = useState<api.UserProfile | null>(null);
@@ -214,17 +217,15 @@ function App() {
   useEffect(() => { localStorage.setItem("readerFont", readerFont); }, [readerFont]);
   useEffect(() => {
     localStorage.setItem("userStats", JSON.stringify(stats));
-    // Sync stats to cloud when logged in
     if (api.isLoggedIn()) {
-      api.syncStats(statsToApi(stats)).catch(() => {});
+      syncQueue.enqueue('sync_stats', statsToApi(stats));
     }
   }, [stats]);
   useEffect(() => {
     if (selectedTitleId) localStorage.setItem('klioSelectedTitle', selectedTitleId);
     else localStorage.removeItem('klioSelectedTitle');
-    // Sync to cloud
     if (api.isLoggedIn()) {
-      api.updateProfile({ selected_title_id: selectedTitleId }).catch(() => {});
+      syncQueue.enqueue('sync_title', { selected_title_id: selectedTitleId });
     }
   }, [selectedTitleId]);
 
@@ -244,7 +245,21 @@ function App() {
     }
   }, [stats, books]);
 
+  // ── Sync Queue lifecycle ──
   useEffect(() => {
+    if (!authUser) {
+      syncQueue.stopProcessing();
+      return;
+    }
+    syncQueue.setBooksRef(() => booksRef.current);
+    syncQueue.setOnUploadComplete(() => loadCloudBooks());
+    syncQueue.setOnQueueChange((count) => setQueueCount(count));
+    syncQueue.startProcessing();
+    return () => syncQueue.stopProcessing();
+  }, [authUser]);
+
+  useEffect(() => {
+    if (!booksLoaded) return;
     async function init() {
       let path = libraryPath;
       if (!path) {
@@ -257,7 +272,7 @@ function App() {
       if (path) scanLibrary(path);
     }
     init();
-  }, []);
+  }, [booksLoaded]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -278,12 +293,17 @@ function App() {
   useEffect(() => {
     const savedRaw = localStorage.getItem("books_meta_v3");
     if (savedRaw) setBooks(JSON.parse(savedRaw));
+    setBooksLoaded(true);
   }, []);
 
+  // Sync booksRef with books state (for use in closures/callbacks)
+  useEffect(() => { booksRef.current = books; }, [books]);
+
   useEffect(() => {
+    if (!booksLoaded) return;
     const booksToSave = books.map(({ cover, ...rest }) => ({ ...rest }));
     localStorage.setItem("books_meta_v3", JSON.stringify(booksToSave));
-  }, [books]);
+  }, [books, booksLoaded]);
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) containerRef.current?.requestFullscreen();
@@ -368,12 +388,12 @@ function App() {
     if (!api.isLoggedIn()) return;
     setCloudLoading(true);
     try {
-      const [books, cloudStats, cloudProfile] = await Promise.all([
+      const [cloudBooksList, cloudStats, cloudProfile] = await Promise.all([
         api.listBooks(),
         api.getStats().catch(() => null),
         api.getProfile().catch(() => null),
       ]);
-      setCloudBooks(books);
+      setCloudBooks(cloudBooksList);
       // Merge cloud stats: use whichever has more XP (conflict resolution)
       if (cloudStats) {
         const remote = statsFromApi(cloudStats);
@@ -383,6 +403,8 @@ function App() {
       if (cloudProfile?.selected_title_id) {
         setSelectedTitleId(cloudProfile.selected_title_id);
       }
+      // Auto-upload local books not yet in cloud
+      autoEnqueueNewBooks(booksRef.current, cloudBooksList);
     } catch (err: any) {
       showAlert('error', 'Error al cargar libros', err.message || 'No se pudieron cargar los libros de la nube');
     } finally {
@@ -390,35 +412,25 @@ function App() {
     }
   }
 
-  async function uploadBookToCloud(book: Book) {
-    if (!api.isLoggedIn()) return;
-    if (uploadingBookId) return;
-    setUploadingBookId(book.id);
-    try {
-      const bytes: number[] = await invoke("read_file_bytes", { path: book.path });
-      const blob = new Blob([new Uint8Array(bytes)], {
-        type: book.type === 'pdf' ? 'application/pdf' : 'application/epub+zip'
-      });
-      const fileName = book.path.split('/').pop() || 'book';
-      const file = new File([blob], fileName, { type: blob.type });
-      const result = await api.uploadBook(file, {
-        title: book.title,
-        author: book.author,
-        total_chapters: book.total_chapters,
-        cover_base64: book.cover || undefined,
-        description: book.description || undefined,
-      });
-      loadCloudBooks();
-      let msg = `"${result.title}" se subió correctamente`;
-      if (result.deduplicated) msg += ' (archivo reutilizado)';
-      if (result.progress_restored) msg += `\nProgreso restaurado: ${result.restored_progress_percent}%`;
-      showAlert('success', 'Libro subido', msg);
-    } catch (err: any) {
-      showAlert('error', 'Error al subir libro', err.message || 'No se pudo subir el libro al servidor');
-    } finally {
-      setUploadingBookId(null);
+  function autoEnqueueNewBooks(localBooks: Book[], cloudBooksList: api.CloudBook[]) {
+    for (const local of localBooks) {
+      const alreadyInCloud = cloudBooksList.some(cb =>
+        cb.title.toLowerCase() === local.title.toLowerCase() &&
+        cb.author.toLowerCase() === local.author.toLowerCase()
+      );
+      if (!alreadyInCloud) {
+        syncQueue.enqueue('upload_book', {
+          bookPath: local.path,
+          title: local.title,
+          author: local.author,
+          total_chapters: local.total_chapters,
+          description: local.description || null,
+          fileType: local.type,
+        });
+      }
     }
   }
+
 
   async function downloadBookFromCloud(cloudBook: api.CloudBook) {
     if (!libraryPath) {
@@ -681,19 +693,21 @@ function App() {
     setBooks(prev => prev.map(b => b.id === updated.id ? updated : b));
     if (delta > 0) setStats(prev => addXP(prev, 10));
 
-    // Sync progress to cloud if logged in
+    // Enqueue progress sync
     if (api.isLoggedIn()) {
       const cloudMatch = cloudBooks.find(cb =>
         cb.title.toLowerCase() === currentBook.title.toLowerCase() &&
         cb.author.toLowerCase() === currentBook.author.toLowerCase()
       );
-      if (cloudMatch) {
-        api.syncProgress(cloudMatch.id, {
-          current_chapter: newIndex,
-          current_page: newIndex,
-          progress_percent: newProgress,
-        }).catch(() => {});
-      }
+      syncQueue.enqueue('sync_progress', {
+        bookPath: currentBook.path,
+        bookTitle: currentBook.title,
+        bookAuthor: currentBook.author,
+        cloudBookId: cloudMatch?.id || null,
+        current_chapter: newIndex,
+        current_page: newIndex,
+        progress_percent: newProgress,
+      });
     }
   }
 
@@ -703,11 +717,23 @@ function App() {
     light: "bg-white text-gray-900"
   };
 
+  const findSvgImage = (node: any): string | null => {
+    if (node instanceof Element) {
+      if (node.name === 'image') return node.attribs.href || node.attribs['xlink:href'] || null;
+      if (node.children) for (const child of node.children) { const r = findSvgImage(child); if (r) return r; }
+    }
+    return null;
+  };
+
   const parserOptions: HTMLReactParserOptions = {
     replace: (domNode) => {
       if (domNode instanceof Element) {
         if (domNode.name === 'img') return <EpubImage src={domNode.attribs.src} bookPath={currentBook?.path || ""} />;
-        if (['html', 'body', 'head', 'script', 'style', 'link'].includes(domNode.name)) return <></>;
+        if (domNode.name === 'svg') {
+          const imgSrc = findSvgImage(domNode);
+          if (imgSrc) return <EpubImage src={imgSrc} bookPath={currentBook?.path || ""} />;
+        }
+        if (['html', 'body', 'head', 'script', 'style', 'link', 'title'].includes(domNode.name)) return <></>;
       }
     },
   };
@@ -1029,9 +1055,10 @@ function App() {
                       <List className="w-5 h-5 text-primary/60" />
                       <h3 className="text-sm font-black uppercase tracking-[0.2em] opacity-50">Sinopsis</h3>
                     </div>
-                    <div className="text-xl leading-[1.8] text-white/70 font-serif max-w-3xl selection:bg-primary/30 first-letter:text-5xl first-letter:font-black first-letter:mr-3 first-letter:float-left first-letter:text-primary">
-                      {selectedBook.description || "No hay una descripción disponible para este libro en sus metadatos. Puedes editar la información del libro para añadir una sinopsis personalizada."}
-                    </div>
+                    {selectedBook.description
+                      ? <div className="text-xl leading-[1.8] text-white/70 font-serif max-w-3xl selection:bg-primary/30 [&>p:first-of-type]:first-letter:text-5xl [&>p:first-of-type]:first-letter:font-black [&>p:first-of-type]:first-letter:mr-3 [&>p:first-of-type]:first-letter:float-left [&>p:first-of-type]:first-letter:text-primary [&>p]:mb-4 [&_b]:font-bold [&_i]:italic [&_a]:text-primary [&_a]:underline" dangerouslySetInnerHTML={{ __html: selectedBook.description }} />
+                      : <div className="text-xl leading-[1.8] text-white/70 font-serif max-w-3xl selection:bg-primary/30 first-letter:text-5xl first-letter:font-black first-letter:mr-3 first-letter:float-left first-letter:text-primary">No hay una descripción disponible para este libro en sus metadatos. Puedes editar la información del libro para añadir una sinopsis personalizada.</div>
+                    }
                   </div>
                 </div>
               </div>
@@ -1096,7 +1123,25 @@ function App() {
                     <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className={`h-8 w-8 ${libraryView === 'list-info' ? 'bg-white/10 text-primary' : 'opacity-50'}`} onClick={() => setLibraryView('list-info')}><List className="w-4 h-4" /></Button></TooltipTrigger><TooltipContent>Lista Detallada</TooltipContent></Tooltip>
                   </div>
                 </div>
-                <Button onClick={selectLibraryFolder} variant="outline" size="sm" className="border-white/10 font-bold tracking-tight">{libraryPath ? 'SINCRONIZAR' : 'CONFIGURAR'}</Button>
+                <div className="flex items-center gap-2">
+                  {queueCount > 0 && (
+                    <Tooltip><TooltipTrigger asChild>
+                      <div className="flex items-center gap-1.5 text-amber-400 text-xs font-bold bg-amber-400/10 px-2.5 py-1.5 rounded-lg">
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        <span>{queueCount}</span>
+                      </div>
+                    </TooltipTrigger><TooltipContent>{queueCount} operación(es) pendiente(s)</TooltipContent></Tooltip>
+                  )}
+                  {libraryPath ? (
+                    <Tooltip><TooltipTrigger asChild>
+                      <Button onClick={selectLibraryFolder} variant="ghost" size="icon" className="h-8 w-8 opacity-50 hover:opacity-100">
+                        <FolderOpen className="w-4 h-4" />
+                      </Button>
+                    </TooltipTrigger><TooltipContent>Cambiar carpeta</TooltipContent></Tooltip>
+                  ) : (
+                    <Button onClick={selectLibraryFolder} variant="outline" size="sm" className="border-white/10 font-bold tracking-tight">CONFIGURAR CARPETA</Button>
+                  )}
+                </div>
               </header>
               <ScrollArea className="flex-1 p-12">
                 <div className={`
@@ -1200,11 +1245,6 @@ function App() {
                       {libraryView === 'grid-large' && (
                         <div className="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                           <Button size="icon" variant="ghost" className="h-8 w-8 bg-black/50 hover:bg-primary/80 rounded-full" onClick={(e) => { e.stopPropagation(); startEditLocalBook(book); }}><Pencil className="w-4 h-4" /></Button>
-                          {authUser && (
-                            <Button size="icon" variant="ghost" className="h-8 w-8 bg-black/50 hover:bg-blue-600 rounded-full" disabled={uploadingBookId === book.id} onClick={(e) => { e.stopPropagation(); uploadBookToCloud(book); }}>
-                              {uploadingBookId === book.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <CloudUpload className="w-4 h-4" />}
-                            </Button>
-                          )}
                         </div>
                       )}
                     </div>
