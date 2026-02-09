@@ -124,6 +124,23 @@ if (empty($errors)) {
             }
             $checks[] = array('Migración 003 (dedup)', 'Aplicada', true);
         }
+
+        // Migración 004: selected_title_id en users
+        $migration004 = __DIR__ . '/migrations/004_add_selected_title.sql';
+        if (file_exists($migration004)) {
+            $cols = $pdo->query('PRAGMA table_info(users)')->fetchAll(PDO::FETCH_ASSOC);
+            $hasSelectedTitle = false;
+            foreach ($cols as $col) {
+                if ($col['name'] === 'selected_title_id') {
+                    $hasSelectedTitle = true;
+                    break;
+                }
+            }
+            if (!$hasSelectedTitle) {
+                $pdo->exec(file_get_contents($migration004));
+            }
+            $checks[] = array('Migración 004 (título)', 'Aplicada', true);
+        }
     } catch (Exception $e) {
         $errors[] = 'Error al crear la base de datos: ' . $e->getMessage();
         $checks[] = array('Base de datos SQLite', 'Error: ' . $e->getMessage(), false);

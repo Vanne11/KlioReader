@@ -68,7 +68,7 @@ $total = (int)$stmt->fetchColumn();
 $totalPages = max(1, ceil($total / $perPage));
 
 // Usuarios
-$sql = "SELECT u.id, u.username, u.email, u.role, u.upload_limit, u.storage_used, u.created_at,
+$sql = "SELECT u.id, u.username, u.email, u.role, u.upload_limit, u.storage_used, u.xp, u.level, u.streak, u.created_at,
         (SELECT COUNT(*) FROM books WHERE user_id = u.id) as book_count
         FROM users u $whereClause ORDER BY u.created_at DESC LIMIT $perPage OFFSET $offset";
 $stmt = $pdo->prepare($sql);
@@ -105,6 +105,8 @@ require_once __DIR__ . '/../templates/admin-layout.php';
                 <th>Usuario</th>
                 <th>Role</th>
                 <th>Libros</th>
+                <th>XP / Nivel</th>
+                <th>Racha</th>
                 <th>Almacenamiento</th>
                 <th>Fecha</th>
                 <th>Acciones</th>
@@ -125,6 +127,17 @@ require_once __DIR__ . '/../templates/admin-layout.php';
                 </td>
                 <td><?php echo (int)$u['book_count']; ?></td>
                 <td>
+                    <span class="text-yellow-400 font-bold"><?php echo (int)$u['xp']; ?></span>
+                    <span class="text-klio-muted text-xs">/ Nv<?php echo (int)$u['level']; ?></span>
+                </td>
+                <td>
+                    <?php if ((int)$u['streak'] > 0): ?>
+                    <span class="text-orange-400 font-bold"><?php echo (int)$u['streak']; ?>d</span>
+                    <?php else: ?>
+                    <span class="text-klio-muted">0</span>
+                    <?php endif; ?>
+                </td>
+                <td>
                     <div class="text-xs"><?php echo format_bytes($u['storage_used']); ?> / <?php echo format_bytes($u['upload_limit']); ?></div>
                     <?php $pct = $u['upload_limit'] > 0 ? min(100, round(($u['storage_used'] / $u['upload_limit']) * 100)) : 0; ?>
                     <div class="w-20 h-1.5 bg-klio-elevated rounded-full mt-1">
@@ -134,6 +147,7 @@ require_once __DIR__ . '/../templates/admin-layout.php';
                 <td class="text-klio-muted text-xs"><?php echo e(substr($u['created_at'], 0, 10)); ?></td>
                 <td>
                     <div class="flex gap-2">
+                        <a href="<?php echo base_url('admin/user-detail.php?id=' . $u['id']); ?>" class="text-blue-400 text-xs hover:underline">Ver</a>
                         <a href="<?php echo base_url('admin/user-edit.php?id=' . $u['id']); ?>" class="text-klio-primary text-xs hover:underline">Editar</a>
                         <?php if ((int)$u['id'] !== (int)$_SESSION['admin_id']): ?>
                         <form method="POST" class="inline" onsubmit="return confirm('Eliminar usuario <?php echo e($u['username']); ?>?')">
@@ -148,7 +162,7 @@ require_once __DIR__ . '/../templates/admin-layout.php';
             </tr>
             <?php endforeach; ?>
             <?php if (empty($users)): ?>
-            <tr><td colspan="7" class="text-center text-klio-muted py-8">No se encontraron usuarios.</td></tr>
+            <tr><td colspan="9" class="text-center text-klio-muted py-8">No se encontraron usuarios.</td></tr>
             <?php endif; ?>
         </tbody>
     </table>

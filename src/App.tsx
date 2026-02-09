@@ -20,7 +20,12 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Document, Page, pdfjs } from 'react-pdf';
 import parse, { Element, HTMLReactParserOptions } from 'html-react-parser';
-import { UserStats, INITIAL_STATS, addXP, updateStreak, statsToApi, statsFromApi } from "@/lib/gamification";
+import {
+  UserStats, INITIAL_STATS, addXP, updateStreak, statsToApi, statsFromApi,
+  BadgeCategory, BadgeWithStatus,
+  BADGES, RARITY_CONFIG, CATEGORY_CONFIG,
+  calculateLevel, getAllBadgesWithStatus, getUnlockedBadges, getUserTitle, getBadgeImageUrl, xpForNextLevel,
+} from "@/lib/gamification";
 import * as api from "@/lib/api";
 
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
@@ -116,6 +121,11 @@ function App() {
   const [newNoteContent, setNewNoteContent] = useState('');
   const [newNoteColor, setNewNoteColor] = useState('#ffeb3b');
 
+  // Badge system
+  const [badgeFilter, setBadgeFilter] = useState<'all' | BadgeCategory>('all');
+  const [selectedTitleId, setSelectedTitleId] = useState<string | null>(() => localStorage.getItem('klioSelectedTitle'));
+  const [selectedBadgeDetail, setSelectedBadgeDetail] = useState<BadgeWithStatus | null>(null);
+
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [numPages, setNumPages] = useState<number | null>(null);
   const scale = 1.0;
@@ -183,7 +193,16 @@ function App() {
 
   const [stats, setStats] = useState<UserStats>(() => {
     const saved = localStorage.getItem("userStats");
-    return saved ? JSON.parse(saved) : INITIAL_STATS;
+    if (!saved) return INITIAL_STATS;
+    const parsed = JSON.parse(saved);
+    // Sanitize: ensure numeric fields are actual numbers (fix PDO string bug)
+    const xp = Number(parsed.xp) || 0;
+    return {
+      xp,
+      level: calculateLevel(xp),
+      streak: Number(parsed.streak) || 0,
+      lastReadDate: parsed.lastReadDate || null,
+    };
   });
 
   // Persistencia
@@ -200,6 +219,30 @@ function App() {
       api.syncStats(statsToApi(stats)).catch(() => {});
     }
   }, [stats]);
+  useEffect(() => {
+    if (selectedTitleId) localStorage.setItem('klioSelectedTitle', selectedTitleId);
+    else localStorage.removeItem('klioSelectedTitle');
+    // Sync to cloud
+    if (api.isLoggedIn()) {
+      api.updateProfile({ selected_title_id: selectedTitleId }).catch(() => {});
+    }
+  }, [selectedTitleId]);
+
+  // Detectar nuevas insignias
+  useEffect(() => {
+    const booksForBadges = books.map(b => ({ progress: b.progress }));
+    const currentUnlocked = getUnlockedBadges(stats, booksForBadges).map(b => b.id);
+    const savedRaw = localStorage.getItem('klioUnlockedBadges');
+    const previousIds: string[] = savedRaw ? JSON.parse(savedRaw) : [];
+    const newBadges = currentUnlocked.filter(id => !previousIds.includes(id));
+    if (newBadges.length > 0 && previousIds.length > 0) {
+      const badge = BADGES.find(b => b.id === newBadges[0]);
+      if (badge) showAlert('success', '¡Nueva Insignia!', `🏆 ${badge.name} — ${badge.description}`);
+    }
+    if (currentUnlocked.length !== previousIds.length || newBadges.length > 0) {
+      localStorage.setItem('klioUnlockedBadges', JSON.stringify(currentUnlocked));
+    }
+  }, [stats, books]);
 
   useEffect(() => {
     async function init() {
@@ -325,15 +368,20 @@ function App() {
     if (!api.isLoggedIn()) return;
     setCloudLoading(true);
     try {
-      const [books, cloudStats] = await Promise.all([
+      const [books, cloudStats, cloudProfile] = await Promise.all([
         api.listBooks(),
         api.getStats().catch(() => null),
+        api.getProfile().catch(() => null),
       ]);
       setCloudBooks(books);
       // Merge cloud stats: use whichever has more XP (conflict resolution)
       if (cloudStats) {
         const remote = statsFromApi(cloudStats);
         setStats(prev => remote.xp >= prev.xp ? remote : prev);
+      }
+      // Sync selected title from cloud
+      if (cloudProfile?.selected_title_id) {
+        setSelectedTitleId(cloudProfile.selected_title_id);
       }
     } catch (err: any) {
       showAlert('error', 'Error al cargar libros', err.message || 'No se pudieron cargar los libros de la nube');
@@ -1015,8 +1063,22 @@ function App() {
               <Button variant="outline" size="sm" className="w-full text-xs border-white/10" onClick={() => setActiveTab('cloud')}><LogIn className="w-3 h-3 mr-2" /> Iniciar Sesión</Button>
             )}
             <Separator className="my-3 opacity-10" />
-            <Badge variant="outline" className="mb-2 border-accent text-accent font-bold">Nivel {stats.level}</Badge>
-            <Progress value={((stats.xp % 100) / 100) * 100} className="h-1" indicatorClassName="bg-amber-400" />
+            <div className="space-y-1">
+              <Badge variant="outline" className="border-accent text-accent font-bold">Nivel {stats.level}</Badge>
+              {(() => {
+                const bfb = books.map(b => ({ progress: b.progress }));
+                const title = getUserTitle(stats, bfb, selectedTitleId);
+                if (!title) return null;
+                const rc = RARITY_CONFIG[title.rarity];
+                return (
+                  <div className="flex items-center gap-1.5">
+                    <img src={getBadgeImageUrl(title.id)} alt="" className="w-5 h-5 object-contain" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                    <span className={`text-[10px] font-bold italic truncate ${rc.text}`}>"{title.name}"</span>
+                  </div>
+                );
+              })()}
+            </div>
+            <Progress value={((stats.xp % 100) / 100) * 100} className="h-1 mt-2" indicatorClassName="bg-amber-400" />
           </div>
         </aside>
 
@@ -1365,35 +1427,220 @@ function App() {
             </ScrollArea>
           )}
 
-          {activeTab === 'gamification' && (
-            <ScrollArea className="flex-1 p-12">
-              <div className="max-w-2xl mx-auto space-y-8">
-                <div className="text-center space-y-4">
-                  <Trophy className="w-16 h-16 text-yellow-500 mx-auto" />
-                  <h2 className="text-3xl font-black">Nivel {stats.level}</h2>
-                  <Progress value={((stats.xp % 100) / 100) * 100} className="h-3 max-w-md mx-auto bg-white/10" indicatorClassName="bg-amber-400" />
-                  <p className="text-sm opacity-50">{stats.xp % 100} / 100 XP para el siguiente nivel</p>
+          {activeTab === 'gamification' && (() => {
+            const booksForBadges = books.map(b => ({ progress: b.progress }));
+            const allBadges = getAllBadgesWithStatus(stats, booksForBadges);
+            const unlockedCount = allBadges.filter(b => b.unlocked).length;
+            const userTitle = getUserTitle(stats, booksForBadges, selectedTitleId);
+            const nextLevelXp = xpForNextLevel(stats.level);
+            const xpProgress = Math.min(100, (stats.xp / nextLevelXp) * 100);
+            const filteredBadges = badgeFilter === 'all' ? allBadges : allBadges.filter(b => b.category === badgeFilter);
+            const completedBooks = books.filter(b => b.progress >= 100).length;
+
+            return (
+              <ScrollArea className="flex-1">
+                <div className="max-w-4xl mx-auto p-8 space-y-8">
+                  {/* Header: Nivel + Título + XP */}
+                  <div className="text-center space-y-4">
+                    <div className="flex items-center justify-center gap-4">
+                      {userTitle && (
+                        <img
+                          src={getBadgeImageUrl(userTitle.id)}
+                          alt={userTitle.name}
+                          className="w-16 h-16 object-contain"
+                          onError={e => {
+                            const el = e.target as HTMLImageElement;
+                            el.style.display = 'none';
+                          }}
+                        />
+                      )}
+                      <div>
+                        <h2 className="text-3xl font-black">Nivel {stats.level}</h2>
+                        {userTitle && (
+                          <p className={`text-sm font-bold italic ${RARITY_CONFIG[userTitle.rarity].text}`}>"{userTitle.name}"</p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="max-w-md mx-auto space-y-1">
+                      <Progress value={xpProgress} className="h-3 bg-white/10" indicatorClassName="bg-gradient-to-r from-amber-600 to-amber-400" />
+                      <p className="text-xs opacity-50">{stats.xp} / {nextLevelXp} XP para el siguiente nivel</p>
+                    </div>
+                  </div>
+
+                  {/* Stat Cards */}
+                  <div className="grid grid-cols-4 gap-3">
+                    <Card className="bg-white/5 border-white/5 p-4 text-center">
+                      <Flame className="w-6 h-6 text-orange-400 mx-auto mb-1" />
+                      <div className="text-xl font-black">{stats.streak}</div>
+                      <div className="text-[9px] opacity-50 uppercase tracking-widest">Racha</div>
+                    </Card>
+                    <Card className="bg-white/5 border-white/5 p-4 text-center">
+                      <BookOpen className="w-6 h-6 text-primary mx-auto mb-1" />
+                      <div className="text-xl font-black">{completedBooks}</div>
+                      <div className="text-[9px] opacity-50 uppercase tracking-widest">Leídos</div>
+                    </Card>
+                    <Card className="bg-white/5 border-white/5 p-4 text-center">
+                      <Trophy className="w-6 h-6 text-yellow-500 mx-auto mb-1" />
+                      <div className="text-xl font-black">{stats.xp}</div>
+                      <div className="text-[9px] opacity-50 uppercase tracking-widest">XP</div>
+                    </Card>
+                    <Card className="bg-white/5 border-white/5 p-4 text-center">
+                      <div className="text-lg mx-auto mb-1">🏅</div>
+                      <div className="text-xl font-black">{unlockedCount}/{BADGES.length}</div>
+                      <div className="text-[9px] opacity-50 uppercase tracking-widest">Logros</div>
+                    </Card>
+                  </div>
+
+                  {/* Insignias Section */}
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-lg font-black uppercase tracking-tight">Insignias</h3>
+                      <span className="text-xs opacity-50 font-bold">{unlockedCount}/{BADGES.length}</span>
+                    </div>
+
+                    {/* Category Filters */}
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        variant={badgeFilter === 'all' ? 'secondary' : 'ghost'}
+                        size="sm"
+                        className="text-xs h-7"
+                        onClick={() => setBadgeFilter('all')}
+                      >
+                        Todas
+                      </Button>
+                      {(Object.keys(CATEGORY_CONFIG) as BadgeCategory[]).map(cat => (
+                        <Button
+                          key={cat}
+                          variant={badgeFilter === cat ? 'secondary' : 'ghost'}
+                          size="sm"
+                          className="text-xs h-7"
+                          onClick={() => setBadgeFilter(cat)}
+                        >
+                          {CATEGORY_CONFIG[cat].emoji} {CATEGORY_CONFIG[cat].label}
+                        </Button>
+                      ))}
+                    </div>
+
+                    {/* Badge Grid */}
+                    <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 gap-3">
+                      {filteredBadges.map(badge => {
+                        const rc = RARITY_CONFIG[badge.rarity];
+                        return (
+                          <button
+                            key={badge.id}
+                            className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border transition-all cursor-pointer hover:scale-105 ${
+                              badge.unlocked
+                                ? `${rc.border} ${rc.bg} shadow-lg ${rc.glow}`
+                                : 'border-white/5 bg-white/[0.02] opacity-50'
+                            }`}
+                            onClick={() => setSelectedBadgeDetail(badge)}
+                          >
+                            <div className="w-12 h-12 flex items-center justify-center">
+                              <img
+                                src={getBadgeImageUrl(badge.id)}
+                                alt={badge.unlocked ? badge.name : '???'}
+                                className={`w-full h-full object-contain ${
+                                  badge.unlocked ? '' : 'grayscale opacity-30 blur-[1px]'
+                                }`}
+                                onError={e => {
+                                  const el = e.target as HTMLImageElement;
+                                  el.style.display = 'none';
+                                  const parent = el.parentElement;
+                                  if (parent && !parent.querySelector('.badge-fallback')) {
+                                    const fb = document.createElement('span');
+                                    fb.className = 'badge-fallback text-2xl';
+                                    fb.textContent = badge.unlocked
+                                      ? CATEGORY_CONFIG[badge.category].emoji
+                                      : '❓';
+                                    parent.appendChild(fb);
+                                  }
+                                }}
+                              />
+                            </div>
+                            <span className={`text-[9px] font-bold text-center leading-tight truncate w-full ${
+                              badge.unlocked ? '' : 'opacity-40'
+                            }`}>
+                              {badge.unlocked ? badge.name : '???'}
+                            </span>
+                            <span className={`text-[8px] font-bold ${badge.unlocked ? rc.text : 'opacity-30'}`}>
+                              ⬥ {RARITY_CONFIG[badge.rarity].label}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
-                <div className="grid grid-cols-3 gap-4">
-                  <Card className="bg-white/5 border-white/5 p-6 text-center">
-                    <Flame className="w-8 h-8 text-orange-400 mx-auto mb-2" />
-                    <div className="text-2xl font-black">{stats.streak}</div>
-                    <div className="text-[10px] opacity-50 uppercase tracking-widest">Racha Días</div>
-                  </Card>
-                  <Card className="bg-white/5 border-white/5 p-6 text-center">
-                    <BookOpen className="w-8 h-8 text-primary mx-auto mb-2" />
-                    <div className="text-2xl font-black">{books.filter(b => b.progress > 0).length}</div>
-                    <div className="text-[10px] opacity-50 uppercase tracking-widest">Libros Leídos</div>
-                  </Card>
-                  <Card className="bg-white/5 border-white/5 p-6 text-center">
-                    <Trophy className="w-8 h-8 text-yellow-500 mx-auto mb-2" />
-                    <div className="text-2xl font-black">{stats.xp}</div>
-                    <div className="text-[10px] opacity-50 uppercase tracking-widest">XP Total</div>
-                  </Card>
-                </div>
-              </div>
-            </ScrollArea>
-          )}
+
+                {/* Badge Detail Dialog */}
+                <Dialog open={!!selectedBadgeDetail} onOpenChange={(open) => { if (!open) setSelectedBadgeDetail(null); }}>
+                  <DialogContent className="sm:max-w-[380px] bg-[#16161e] border-white/10 text-white">
+                    {selectedBadgeDetail && (() => {
+                      const rc = RARITY_CONFIG[selectedBadgeDetail.rarity];
+                      return (
+                        <div className="flex flex-col items-center text-center py-4 space-y-4">
+                          <div className={`w-24 h-24 flex items-center justify-center rounded-2xl ${
+                            selectedBadgeDetail.unlocked ? `${rc.bg} border-2 ${rc.border}` : 'bg-white/5 border border-white/10'
+                          }`}>
+                            <img
+                              src={getBadgeImageUrl(selectedBadgeDetail.id)}
+                              alt={selectedBadgeDetail.name}
+                              className={`w-20 h-20 object-contain ${
+                                selectedBadgeDetail.unlocked ? '' : 'grayscale opacity-30 blur-[1px]'
+                              }`}
+                              onError={e => {
+                                const el = e.target as HTMLImageElement;
+                                el.style.display = 'none';
+                                const parent = el.parentElement;
+                                if (parent && !parent.querySelector('.badge-fallback')) {
+                                  const fb = document.createElement('span');
+                                  fb.className = 'badge-fallback text-5xl';
+                                  fb.textContent = selectedBadgeDetail.unlocked
+                                    ? CATEGORY_CONFIG[selectedBadgeDetail.category].emoji
+                                    : '🔒';
+                                  parent.appendChild(fb);
+                                }
+                              }}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <h3 className="text-lg font-black">
+                              {selectedBadgeDetail.unlocked ? selectedBadgeDetail.name : 'Insignia Bloqueada'}
+                            </h3>
+                            <Badge className={`${rc.bg} ${rc.text} border ${rc.border} text-[10px]`}>
+                              ⬥ {RARITY_CONFIG[selectedBadgeDetail.rarity].label}
+                            </Badge>
+                          </div>
+                          <p className="text-sm opacity-70">
+                            {selectedBadgeDetail.unlocked
+                              ? selectedBadgeDetail.description
+                              : `Pista: ${selectedBadgeDetail.description}`}
+                          </p>
+                          <div className="flex items-center gap-2 text-[10px] opacity-40">
+                            <span>{CATEGORY_CONFIG[selectedBadgeDetail.category].emoji}</span>
+                            <span>{CATEGORY_CONFIG[selectedBadgeDetail.category].label}</span>
+                          </div>
+                          {selectedBadgeDetail.unlocked && (
+                            <Button
+                              size="sm"
+                              className="w-full text-xs font-bold"
+                              variant={selectedTitleId === selectedBadgeDetail.id ? 'secondary' : 'default'}
+                              onClick={() => {
+                                setSelectedTitleId(prev => prev === selectedBadgeDetail.id ? null : selectedBadgeDetail.id);
+                                setSelectedBadgeDetail(null);
+                              }}
+                            >
+                              {selectedTitleId === selectedBadgeDetail.id ? '✓ Título Activo' : 'Usar como Título'}
+                            </Button>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </DialogContent>
+                </Dialog>
+              </ScrollArea>
+            );
+          })()}
         </main>
       </div>
     );

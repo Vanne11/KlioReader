@@ -107,6 +107,7 @@ export interface CloudBook {
 
 export interface UserProfile extends AuthUser {
   avatar: string | null;
+  selected_title_id: string | null;
   total_books: number;
   total_notes: number;
   total_bookmarks: number;
@@ -198,7 +199,7 @@ export async function getProfile(): Promise<UserProfile> {
 }
 
 export async function updateProfile(
-  data: Partial<{ username: string; email: string; password: string; avatar: string }>
+  data: Partial<{ username: string; email: string; password: string; avatar: string; selected_title_id: string | null }>
 ): Promise<void> {
   await request("/api/user/profile", {
     method: "PUT",

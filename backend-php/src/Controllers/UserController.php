@@ -6,7 +6,7 @@ class UserController
     public function profile($params)
     {
         $db = Database::get();
-        $stmt = $db->prepare('SELECT id, username, email, avatar, xp, level, streak, last_streak_date, created_at FROM users WHERE id = ?');
+        $stmt = $db->prepare('SELECT id, username, email, avatar, xp, level, streak, last_streak_date, selected_title_id, created_at FROM users WHERE id = ?');
         $stmt->execute(array($params['user_id']));
         $user = $stmt->fetch();
 
@@ -29,6 +29,11 @@ class UserController
         $stmt->execute(array($params['user_id']));
         $bookmarkCount = $stmt->fetch();
 
+        // Cast integer fields (PDO/SQLite returns strings)
+        $user['id'] = (int)$user['id'];
+        $user['xp'] = (int)$user['xp'];
+        $user['level'] = (int)$user['level'];
+        $user['streak'] = (int)$user['streak'];
         $user['total_books'] = (int)$bookCount['total_books'];
         $user['total_notes'] = (int)$noteCount['total_notes'];
         $user['total_bookmarks'] = (int)$bookmarkCount['total_bookmarks'];
@@ -61,6 +66,10 @@ class UserController
             $fields[] = 'password_hash = ?';
             $values[] = password_hash($data['password'], PASSWORD_BCRYPT);
         }
+        if (array_key_exists('selected_title_id', $data)) {
+            $fields[] = 'selected_title_id = ?';
+            $values[] = $data['selected_title_id'];
+        }
 
         if (empty($fields)) {
             http_response_code(422);
@@ -86,7 +95,13 @@ class UserController
         $db = Database::get();
         $stmt = $db->prepare('SELECT xp, level, streak, last_streak_date FROM users WHERE id = ?');
         $stmt->execute(array($params['user_id']));
-        echo json_encode($stmt->fetch());
+        $row = $stmt->fetch();
+        if ($row) {
+            $row['xp'] = (int)$row['xp'];
+            $row['level'] = (int)$row['level'];
+            $row['streak'] = (int)$row['streak'];
+        }
+        echo json_encode($row);
     }
 
     // DELETE /api/user/delete
