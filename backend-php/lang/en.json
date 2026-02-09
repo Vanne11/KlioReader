@@ -1,0 +1,45 @@
+{
+    "hero_title": "Read without limits",
+    "hero_subtitle": "Your personal digital library, always with you",
+
+    "nav_home": "Home",
+    "nav_downloads": "Downloads",
+    "nav_admin": "Admin",
+
+    "btn_download_app": "Download App",
+    "btn_view_github": "View on GitHub",
+    "btn_view_downloads": "View Downloads",
+
+    "section_features": "Features",
+    "features_desc": "Everything you need to enjoy your digital books and comics",
+
+    "feature_books_title": "Books & Comics",
+    "feature_books_desc": "Read EPUB, PDF and comics in CBR/CBZ with high-quality native rendering. All in one app.",
+    "feature_comics_title": "Comic Viewer",
+    "feature_comics_desc": "Dedicated reader for CBR and CBZ with page navigation, zoom and fullscreen view.",
+    "feature_cloud_title": "Cloud Library",
+    "feature_cloud_desc": "Sync your library across devices. Your books always available, anywhere.",
+    "feature_notes_title": "Notes & Bookmarks",
+    "feature_notes_desc": "Highlight, annotate and save bookmarks. Your knowledge organized, always at hand.",
+    "feature_progress_title": "Reading Progress",
+    "feature_progress_desc": "Pick up exactly where you left off. Automatic tracking by chapter and page.",
+    "feature_gamification_title": "XP & Streaks",
+    "feature_gamification_desc": "Earn XP while reading, level up and keep your daily streak. Gamified reading.",
+    "feature_desktop_title": "Desktop App",
+    "feature_desktop_desc": "Native application for Windows, macOS and Linux with Tauri. Fast, lightweight and secure.",
+
+    "latest_version": "Latest Version",
+
+    "downloads_title": "Downloads",
+    "downloads_subtitle": "Download KlioReader for your platform",
+    "downloads_error_fetch": "Could not fetch releases at this time.",
+    "downloads_no_releases": "No releases available yet.",
+    "downloads_visit_repo": "Visit the repository",
+    "downloads_badge_latest": "Latest",
+    "downloads_badge_prerelease": "Pre-release",
+    "downloads_published": "Published:",
+    "downloads_no_assets": "No attachments for this release.",
+    "downloads_all_github": "View all releases on GitHub",
+
+    "platform_other": "Other"
+}

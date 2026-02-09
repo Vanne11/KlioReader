@@ -25,6 +25,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         redirect(base_url('admin/users.php'));
     }
 
+    if ($_POST['action'] === 'delete_selected') {
+        verify_csrf();
+        $selectedIds = isset($_POST['user_ids']) ? $_POST['user_ids'] : array();
+        $deleted = 0;
+        foreach ($selectedIds as $uid) {
+            $uid = (int)$uid;
+            if ($uid === (int)$_SESSION['admin_id'] || $uid <= 0) continue;
+            $uploadsDir = dirname(__DIR__) . '/uploads/' . $uid;
+            if (is_dir($uploadsDir)) {
+                $files = glob($uploadsDir . '/*');
+                if ($files) array_map('unlink', $files);
+                rmdir($uploadsDir);
+            }
+            $pdo->prepare('DELETE FROM users WHERE id = ?')->execute(array($uid));
+            $deleted++;
+        }
+        if ($deleted > 0) {
+            flash('success', $deleted . ' usuario(s) eliminado(s).');
+        }
+        redirect(base_url('admin/users.php'));
+    }
+
     if ($_POST['action'] === 'create') {
         $username = trim($_POST['username'] ?? '');
         $email = trim($_POST['email'] ?? '');
@@ -98,81 +120,99 @@ require_once __DIR__ . '/../templates/admin-layout.php';
     </div>
 </form>
 
+<!-- Toolbar eliminacion masiva -->
+<div class="flex items-center gap-2 mb-3">
+    <button type="button" id="btnDeleteSelected" onclick="deleteSelectedUsers()" disabled class="px-3 py-1.5 rounded-lg text-xs text-red-400 bg-red-500/10 border border-red-500/20 hover:bg-red-500/20 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+        Eliminar seleccionados (<span id="selectedCount">0</span>)
+    </button>
+</div>
+
 <!-- Tabla -->
 <div class="bg-klio-card border border-klio-border rounded-xl overflow-x-auto">
-    <table class="admin-table">
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>Usuario</th>
-                <th>Role</th>
-                <th>Libros</th>
-                <th>XP / Nivel</th>
-                <th>Racha</th>
-                <th>Almacenamiento</th>
-                <th>Fecha</th>
-                <th>Acciones</th>
-            </tr>
-        </thead>
-        <tbody>
-            <?php foreach ($users as $u): ?>
-            <tr>
-                <td class="text-klio-muted"><?php echo $u['id']; ?></td>
-                <td>
-                    <div class="font-medium">
-                        <?php echo e($u['username']); ?>
-                        <?php if ((int)$u['is_subscriber']): ?>
-                        <span class="text-amber-400 ml-1" title="Suscriptor Cloud">&#x1F451;</span>
+    <form method="POST" id="formDeleteUsers">
+        <?php echo csrf_field(); ?>
+        <input type="hidden" name="action" value="delete_selected">
+        <table class="admin-table">
+            <thead>
+                <tr>
+                    <th class="w-8"><input type="checkbox" id="checkAll" onchange="toggleAllUsers(this)" class="accent-klio-primary cursor-pointer"></th>
+                    <th>ID</th>
+                    <th>Usuario</th>
+                    <th>Role</th>
+                    <th>Libros</th>
+                    <th>XP / Nivel</th>
+                    <th>Racha</th>
+                    <th>Almacenamiento</th>
+                    <th>Fecha</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($users as $u): ?>
+                <?php $isSelf = (int)$u['id'] === (int)$_SESSION['admin_id']; ?>
+                <tr>
+                    <td>
+                        <?php if (!$isSelf): ?>
+                        <input type="checkbox" name="user_ids[]" value="<?php echo $u['id']; ?>" onchange="updateSelectedUsers()" class="accent-klio-primary cursor-pointer">
                         <?php endif; ?>
-                    </div>
-                    <div class="text-klio-muted text-xs"><?php echo e($u['email']); ?></div>
-                </td>
-                <td>
-                    <span class="px-2 py-0.5 rounded-full text-xs <?php echo $u['role'] === 'admin' ? 'bg-klio-primary/15 text-klio-primary' : 'bg-klio-elevated text-klio-muted'; ?>">
-                        <?php echo e($u['role']); ?>
-                    </span>
-                </td>
-                <td><?php echo (int)$u['book_count']; ?></td>
-                <td>
-                    <span class="text-yellow-400 font-bold"><?php echo (int)$u['xp']; ?></span>
-                    <span class="text-klio-muted text-xs">/ Nv<?php echo (int)$u['level']; ?></span>
-                </td>
-                <td>
-                    <?php if ((int)$u['streak'] > 0): ?>
-                    <span class="text-orange-400 font-bold"><?php echo (int)$u['streak']; ?>d</span>
-                    <?php else: ?>
-                    <span class="text-klio-muted">0</span>
-                    <?php endif; ?>
-                </td>
-                <td>
-                    <div class="text-xs"><?php echo format_bytes($u['storage_used']); ?> / <?php echo format_bytes($u['upload_limit']); ?></div>
-                    <?php $pct = $u['upload_limit'] > 0 ? min(100, round(($u['storage_used'] / $u['upload_limit']) * 100)) : 0; ?>
-                    <div class="w-20 h-1.5 bg-klio-elevated rounded-full mt-1">
-                        <div class="progress-bar" style="width: <?php echo $pct; ?>%"></div>
-                    </div>
-                </td>
-                <td class="text-klio-muted text-xs"><?php echo e(substr($u['created_at'], 0, 10)); ?></td>
-                <td>
-                    <div class="flex gap-2">
-                        <a href="<?php echo base_url('admin/user-detail.php?id=' . $u['id']); ?>" class="text-blue-400 text-xs hover:underline">Ver</a>
-                        <a href="<?php echo base_url('admin/user-edit.php?id=' . $u['id']); ?>" class="text-klio-primary text-xs hover:underline">Editar</a>
-                        <?php if ((int)$u['id'] !== (int)$_SESSION['admin_id']): ?>
-                        <form method="POST" class="inline" onsubmit="return confirm('Eliminar usuario <?php echo e($u['username']); ?>?')">
-                            <?php echo csrf_field(); ?>
-                            <input type="hidden" name="action" value="delete">
-                            <input type="hidden" name="user_id" value="<?php echo $u['id']; ?>">
-                            <button type="submit" class="text-red-400 text-xs hover:underline">Eliminar</button>
-                        </form>
+                    </td>
+                    <td class="text-klio-muted"><?php echo $u['id']; ?></td>
+                    <td>
+                        <div class="font-medium">
+                            <?php echo e($u['username']); ?>
+                            <?php if ((int)$u['is_subscriber']): ?>
+                            <span class="text-amber-400 ml-1" title="Suscriptor Cloud">&#x1F451;</span>
+                            <?php endif; ?>
+                        </div>
+                        <div class="text-klio-muted text-xs"><?php echo e($u['email']); ?></div>
+                    </td>
+                    <td>
+                        <span class="px-2 py-0.5 rounded-full text-xs <?php echo $u['role'] === 'admin' ? 'bg-klio-primary/15 text-klio-primary' : 'bg-klio-elevated text-klio-muted'; ?>">
+                            <?php echo e($u['role']); ?>
+                        </span>
+                    </td>
+                    <td><?php echo (int)$u['book_count']; ?></td>
+                    <td>
+                        <span class="text-yellow-400 font-bold"><?php echo (int)$u['xp']; ?></span>
+                        <span class="text-klio-muted text-xs">/ Nv<?php echo (int)$u['level']; ?></span>
+                    </td>
+                    <td>
+                        <?php if ((int)$u['streak'] > 0): ?>
+                        <span class="text-orange-400 font-bold"><?php echo (int)$u['streak']; ?>d</span>
+                        <?php else: ?>
+                        <span class="text-klio-muted">0</span>
                         <?php endif; ?>
-                    </div>
-                </td>
-            </tr>
-            <?php endforeach; ?>
-            <?php if (empty($users)): ?>
-            <tr><td colspan="9" class="text-center text-klio-muted py-8">No se encontraron usuarios.</td></tr>
-            <?php endif; ?>
-        </tbody>
-    </table>
+                    </td>
+                    <td>
+                        <div class="text-xs"><?php echo format_bytes($u['storage_used']); ?> / <?php echo format_bytes($u['upload_limit']); ?></div>
+                        <?php $pct = $u['upload_limit'] > 0 ? min(100, round(($u['storage_used'] / $u['upload_limit']) * 100)) : 0; ?>
+                        <div class="w-20 h-1.5 bg-klio-elevated rounded-full mt-1">
+                            <div class="progress-bar" style="width: <?php echo $pct; ?>%"></div>
+                        </div>
+                    </td>
+                    <td class="text-klio-muted text-xs"><?php echo e(substr($u['created_at'], 0, 10)); ?></td>
+                    <td>
+                        <div class="flex gap-2">
+                            <a href="<?php echo base_url('admin/user-detail.php?id=' . $u['id']); ?>" class="text-blue-400 text-xs hover:underline">Ver</a>
+                            <a href="<?php echo base_url('admin/user-edit.php?id=' . $u['id']); ?>" class="text-klio-primary text-xs hover:underline">Editar</a>
+                            <?php if (!$isSelf): ?>
+                            <form method="POST" class="inline" onsubmit="return confirm('Eliminar usuario <?php echo e($u['username']); ?>?')">
+                                <?php echo csrf_field(); ?>
+                                <input type="hidden" name="action" value="delete">
+                                <input type="hidden" name="user_id" value="<?php echo $u['id']; ?>">
+                                <button type="submit" class="text-red-400 text-xs hover:underline">Eliminar</button>
+                            </form>
+                            <?php endif; ?>
+                        </div>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+                <?php if (empty($users)): ?>
+                <tr><td colspan="10" class="text-center text-klio-muted py-8">No se encontraron usuarios.</td></tr>
+                <?php endif; ?>
+            </tbody>
+        </table>
+    </form>
 </div>
 
 <!-- Paginacion -->
@@ -220,6 +260,34 @@ require_once __DIR__ . '/../templates/admin-layout.php';
         </form>
     </div>
 </div>
+
+<script>
+function toggleAllUsers(master) {
+    var checkboxes = document.querySelectorAll('#formDeleteUsers input[name="user_ids[]"]');
+    for (var i = 0; i < checkboxes.length; i++) {
+        checkboxes[i].checked = master.checked;
+    }
+    updateSelectedUsers();
+}
+
+function updateSelectedUsers() {
+    var checkboxes = document.querySelectorAll('#formDeleteUsers input[name="user_ids[]"]');
+    var checked = document.querySelectorAll('#formDeleteUsers input[name="user_ids[]"]:checked');
+    var btn = document.getElementById('btnDeleteSelected');
+    var count = document.getElementById('selectedCount');
+    var checkAll = document.getElementById('checkAll');
+    if (count) count.textContent = checked.length;
+    if (btn) btn.disabled = checked.length === 0;
+    if (checkAll) checkAll.checked = checkboxes.length > 0 && checked.length === checkboxes.length;
+}
+
+function deleteSelectedUsers() {
+    var checked = document.querySelectorAll('#formDeleteUsers input[name="user_ids[]"]:checked');
+    if (checked.length === 0) return;
+    if (!confirm('Eliminar ' + checked.length + ' usuario(s) seleccionado(s)? Esta accion no se puede deshacer.')) return;
+    document.getElementById('formDeleteUsers').submit();
+}
+</script>
 
     </main>
 </div>

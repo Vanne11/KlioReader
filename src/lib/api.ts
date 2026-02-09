@@ -210,8 +210,16 @@ export interface UploadResponse {
   file_size: number;
   storage_type: string;
   deduplicated: boolean;
+  already_existed?: boolean;
   progress_restored: boolean;
   restored_progress_percent?: number;
+}
+
+export interface RemoveDuplicatesResponse {
+  ok: boolean;
+  removed: number;
+  kept: Array<{ id: number; title: string }>;
+  size_freed: number;
 }
 
 // ── Auth ──
@@ -329,6 +337,12 @@ export async function updateBook(
 
 export async function deleteBook(id: number): Promise<void> {
   await request(`/api/books/${id}`, { method: "DELETE" });
+}
+
+export async function removeDuplicates(): Promise<RemoveDuplicatesResponse> {
+  return request<RemoveDuplicatesResponse>("/api/books/remove-duplicates", {
+    method: "POST",
+  });
 }
 
 // ── Reading Progress ──

@@ -1,4 +1,5 @@
 mod storage;
+mod watcher;
 
 use serde::{Serialize, Deserialize};
 use std::path::Path;
@@ -10,6 +11,7 @@ use lopdf::Document;
 use base64::{Engine as _, engine::general_purpose};
 use storage::commands::SyncEngineState;
 use storage::sync_engine::SyncEngine;
+use watcher::{LibraryWatcher, LibraryWatcherState};
 
 const IMAGE_EXTS: &[&str] = &[".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg", ".jxl", ".avif"];
 
@@ -627,6 +629,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(SyncEngineState(Arc::new(tokio::sync::Mutex::new(SyncEngine::new()))))
+        .manage(LibraryWatcherState(Arc::new(tokio::sync::Mutex::new(LibraryWatcher::new()))))
         .invoke_handler(tauri::generate_handler![
             greet,
             get_metadata,
@@ -656,7 +659,9 @@ pub fn run() {
             storage::commands::user_storage_list_remote,
             storage::commands::user_storage_update_progress,
             storage::commands::user_storage_get_progress,
-            storage::commands::gdrive_start_auth
+            storage::commands::gdrive_start_auth,
+            watcher::start_library_watcher,
+            watcher::stop_library_watcher
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

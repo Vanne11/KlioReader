@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?php echo isset($pageTitle) ? e($pageTitle) . ' - ' : ''; ?><?php echo e(get_setting('site_name', 'KlioReader')); ?></title>
+    <link rel="icon" type="image/x-icon" href="<?php echo base_url('assets/img/favicon.ico'); ?>">
+    <link rel="icon" type="image/png" sizes="32x32" href="<?php echo base_url('assets/img/favicon.png'); ?>">
+    <link rel="apple-touch-icon" href="<?php echo base_url('assets/img/logo.png'); ?>">
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
     tailwind.config = {

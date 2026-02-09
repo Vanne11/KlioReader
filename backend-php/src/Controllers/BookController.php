@@ -284,6 +284,28 @@ class BookController
         // Computar hash del libro para detección de progreso
         $bookHash = StorageManager::computeBookHash($title, $author);
 
+        // Upload idempotente: si ya existe un libro con el mismo user_id + book_hash, retornarlo
+        $stmt = $db->prepare('SELECT id, title, author, file_name, file_type, file_size, storage_type FROM books WHERE user_id = ? AND book_hash = ?');
+        $stmt->execute(array($userId, $bookHash));
+        $existingBook = $stmt->fetch();
+        if ($existingBook) {
+            @unlink($localPath);
+            @rmdir($userDir);
+            http_response_code(200);
+            echo json_encode(array(
+                'id' => (int)$existingBook['id'],
+                'title' => $existingBook['title'],
+                'author' => $existingBook['author'],
+                'file_name' => $existingBook['file_name'],
+                'file_type' => $existingBook['file_type'],
+                'file_size' => (int)$existingBook['file_size'],
+                'storage_type' => $existingBook['storage_type'],
+                'deduplicated' => false,
+                'already_existed' => true,
+            ));
+            return;
+        }
+
         // Verificar progreso archivado (detección de libro re-subido)
         $archivedProgress = null;
         $stmt = $db->prepare('SELECT * FROM progress_archive WHERE user_id = ? AND book_hash = ?');
@@ -427,6 +449,26 @@ class BookController
 
         // Computar book_hash para detección de progreso
         $bookHash = StorageManager::computeBookHash($title, $author);
+
+        // Upload idempotente: si ya existe un libro con el mismo user_id + book_hash, retornarlo
+        $stmt = $db->prepare('SELECT id, title, author, file_name, file_type, file_size, storage_type FROM books WHERE user_id = ? AND book_hash = ?');
+        $stmt->execute(array($userId, $bookHash));
+        $existingBook = $stmt->fetch();
+        if ($existingBook) {
+            http_response_code(200);
+            echo json_encode(array(
+                'id' => (int)$existingBook['id'],
+                'title' => $existingBook['title'],
+                'author' => $existingBook['author'],
+                'file_name' => $existingBook['file_name'],
+                'file_type' => $existingBook['file_type'],
+                'file_size' => (int)$existingBook['file_size'],
+                'storage_type' => $existingBook['storage_type'],
+                'deduplicated' => true,
+                'already_existed' => true,
+            ));
+            return;
+        }
 
         // Verificar progreso archivado
         $archivedProgress = null;
@@ -698,6 +740,86 @@ class BookController
 
         http_response_code(201);
         echo json_encode(array('id' => (int)$db->lastInsertId()));
+    }
+
+    // POST /api/books/remove-duplicates
+    public function removeDuplicates($params)
+    {
+        $userId = $params['user_id'];
+        $db = Database::get();
+
+        // Encontrar grupos de libros duplicados (mismo book_hash, múltiples registros)
+        $stmt = $db->prepare('
+            SELECT book_hash, COUNT(*) as cnt
+            FROM books
+            WHERE user_id = ? AND book_hash IS NOT NULL AND book_hash != ?
+            GROUP BY book_hash
+            HAVING cnt > 1
+        ');
+        $stmt->execute(array($userId, ''));
+        $groups = $stmt->fetchAll();
+
+        $removed = 0;
+        $totalSizeFreed = 0;
+        $kept = array();
+
+        foreach ($groups as $group) {
+            $bookHash = $group['book_hash'];
+
+            // Obtener todos los libros de este grupo con su progreso
+            $stmt = $db->prepare('
+                SELECT b.id, b.title, b.author, b.file_size, b.book_hash, b.stored_file_id,
+                       COALESCE(rp.progress_percent, 0) as progress_percent,
+                       rp.current_chapter, rp.current_page, rp.last_read
+                FROM books b
+                LEFT JOIN reading_progress rp ON rp.book_id = b.id AND rp.user_id = b.user_id
+                WHERE b.user_id = ? AND b.book_hash = ?
+                ORDER BY COALESCE(rp.progress_percent, 0) DESC, rp.last_read DESC, b.id ASC
+            ');
+            $stmt->execute(array($userId, $bookHash));
+            $dupes = $stmt->fetchAll();
+
+            if (count($dupes) < 2) continue;
+
+            // Conservar el primero (mayor progreso, desempate por last_read más reciente)
+            $keeper = $dupes[0];
+            $kept[] = array('id' => (int)$keeper['id'], 'title' => $keeper['title']);
+
+            for ($i = 1; $i < count($dupes); $i++) {
+                $dupe = $dupes[$i];
+
+                // Archivar progreso si tiene alguno
+                if ((int)$dupe['progress_percent'] > 0 && !empty($dupe['book_hash'])) {
+                    $stmt = $db->prepare('INSERT OR IGNORE INTO progress_archive (user_id, book_hash, current_chapter, current_page, progress_percent, last_read) VALUES (?, ?, ?, ?, ?, ?)');
+                    $stmt->execute(array(
+                        $userId,
+                        $dupe['book_hash'],
+                        (int)$dupe['current_chapter'],
+                        (int)$dupe['current_page'],
+                        (int)$dupe['progress_percent'],
+                        $dupe['last_read']
+                    ));
+                }
+
+                // Eliminar el duplicado
+                $db->prepare('DELETE FROM books WHERE id = ? AND user_id = ?')->execute(array($dupe['id'], $userId));
+                $totalSizeFreed += (int)$dupe['file_size'];
+                $removed++;
+            }
+        }
+
+        // Ajustar storage_used
+        if ($totalSizeFreed > 0) {
+            $db->prepare('UPDATE users SET storage_used = MAX(0, storage_used - ?) WHERE id = ?')
+                ->execute(array($totalSizeFreed, $userId));
+        }
+
+        echo json_encode(array(
+            'ok' => true,
+            'removed' => $removed,
+            'kept' => $kept,
+            'size_freed' => $totalSizeFreed,
+        ));
     }
 
     // DELETE /api/bookmarks/{id}

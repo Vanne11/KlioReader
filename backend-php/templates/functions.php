@@ -79,6 +79,39 @@ function e($str) {
     return htmlspecialchars($str, ENT_QUOTES, 'UTF-8');
 }
 
+function current_lang() {
+    static $lang = null;
+    if ($lang !== null) return $lang;
+    $supported = array('es', 'en');
+    if (isset($_GET['lang']) && in_array($_GET['lang'], $supported)) {
+        $lang = $_GET['lang'];
+        setcookie('klio_lang', $lang, time() + 86400 * 365, '/');
+        return $lang;
+    }
+    if (isset($_COOKIE['klio_lang']) && in_array($_COOKIE['klio_lang'], $supported)) {
+        $lang = $_COOKIE['klio_lang'];
+        return $lang;
+    }
+    $lang = 'en';
+    return $lang;
+}
+
+function t($key) {
+    static $strings = null;
+    if ($strings === null) {
+        $lang = current_lang();
+        $file = dirname(__DIR__) . '/lang/' . $lang . '.json';
+        if (!file_exists($file)) {
+            $file = dirname(__DIR__) . '/lang/en.json';
+        }
+        if (file_exists($file)) {
+            $strings = json_decode(file_get_contents($file), true);
+        }
+        if (!$strings) $strings = array();
+    }
+    return isset($strings[$key]) ? $strings[$key] : $key;
+}
+
 function base_url($path = '') {
     static $base = null;
     if ($base === null) {

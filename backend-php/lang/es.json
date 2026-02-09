@@ -1,0 +1,45 @@
+{
+    "hero_title": "Lee sin limites",
+    "hero_subtitle": "Tu biblioteca digital personal, siempre contigo",
+
+    "nav_home": "Inicio",
+    "nav_downloads": "Descargas",
+    "nav_admin": "Admin",
+
+    "btn_download_app": "Descargar App",
+    "btn_view_github": "Ver en GitHub",
+    "btn_view_downloads": "Ver Descargas",
+
+    "section_features": "Caracteristicas",
+    "features_desc": "Todo lo que necesitas para disfrutar de tus libros y comics digitales",
+
+    "feature_books_title": "Libros y Comics",
+    "feature_books_desc": "Lee EPUB, PDF y comics en CBR/CBZ con renderizado nativo de alta calidad. Todo en una sola app.",
+    "feature_comics_title": "Visor de Comics",
+    "feature_comics_desc": "Lector dedicado para CBR y CBZ con navegacion por pagina, zoom y vista a pantalla completa.",
+    "feature_cloud_title": "Biblioteca en la Nube",
+    "feature_cloud_desc": "Sincroniza tu biblioteca entre dispositivos. Tus libros siempre disponibles, en cualquier lugar.",
+    "feature_notes_title": "Notas y Marcadores",
+    "feature_notes_desc": "Subraya, anota y guarda marcadores. Tu conocimiento organizado, siempre a la mano.",
+    "feature_progress_title": "Progreso de Lectura",
+    "feature_progress_desc": "Retoma exactamente donde lo dejaste. Seguimiento automatico por capitulo y pagina.",
+    "feature_gamification_title": "Experiencia y Racha",
+    "feature_gamification_desc": "Gana XP al leer, sube de nivel y mantiene tu racha diaria. Lectura gamificada.",
+    "feature_desktop_title": "App de Escritorio",
+    "feature_desktop_desc": "Aplicacion nativa para Windows, macOS y Linux con Tauri. Rapida, ligera y segura.",
+
+    "latest_version": "Ultima Version",
+
+    "downloads_title": "Descargas",
+    "downloads_subtitle": "Descarga KlioReader para tu plataforma",
+    "downloads_error_fetch": "No se pudieron obtener las releases en este momento.",
+    "downloads_no_releases": "Aun no hay releases disponibles.",
+    "downloads_visit_repo": "Visita el repositorio",
+    "downloads_badge_latest": "Ultima",
+    "downloads_badge_prerelease": "Pre-release",
+    "downloads_published": "Publicado:",
+    "downloads_no_assets": "Sin archivos adjuntos para esta release.",
+    "downloads_all_github": "Ver todas las releases en GitHub",
+
+    "platform_other": "Otro"
+}

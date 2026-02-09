@@ -7,8 +7,14 @@ import { useGamificationStore } from '@/stores/gamificationStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useUIStore } from '@/stores/uiStore';
 import { statsFromApi, getUnlockedBadges } from '@/lib/gamification';
+import { useT } from '@/i18n';
 import type { Book, CloudBook, ScanResult } from '@/types';
 import { mapScanResults } from './useLibrary';
+
+// Normalización que replica StorageManager::computeBookHash() del backend
+function normalizeForComparison(text: string): string {
+  return text.toLowerCase().trim().replace(/\s+/g, ' ').replace(/[^\p{L}\p{N}\s]/gu, '');
+}
 
 // Ref to prevent re-enqueuing cloud data back to queue
 let cloudSyncingRef = false;
@@ -16,6 +22,7 @@ export function getCloudSyncingRef() { return cloudSyncingRef; }
 export function setCloudSyncingRef(val: boolean) { cloudSyncingRef = val; }
 
 export function useCloudBooks() {
+  const { t } = useT();
   const {
     cloudBooks, setCloudBooks, setCloudBooksReady, setCloudLoading,
     setDownloadingBookId, downloadingBookId,
@@ -76,9 +83,11 @@ export function useCloudBooks() {
 
   function autoEnqueueNewBooks(localBooks: Book[], cloudBooksList: api.CloudBook[]) {
     for (const local of localBooks) {
+      const localTitle = normalizeForComparison(local.title);
+      const localAuthor = normalizeForComparison(local.author);
       const alreadyInCloud = cloudBooksList.some(cb =>
-        cb.title.toLowerCase() === local.title.toLowerCase() &&
-        cb.author.toLowerCase() === local.author.toLowerCase()
+        normalizeForComparison(cb.title) === localTitle &&
+        normalizeForComparison(cb.author) === localAuthor
       );
       if (!alreadyInCloud) {
         syncQueue.enqueue('upload_book', {
@@ -91,6 +100,8 @@ export function useCloudBooks() {
         });
       }
     }
+    // Sincronizar colecciones locales a la nube (se ejecuta al final de la cola)
+    syncQueue.enqueue('sync_collections', {});
   }
 
   async function downloadBookFromCloud(cloudBook: CloudBook) {
@@ -167,8 +178,23 @@ export function useCloudBooks() {
     }
   }
 
+  async function removeCloudDuplicates() {
+    try {
+      const result = await api.removeDuplicates();
+      if (result.removed > 0) {
+        await loadCloudBooks();
+        showAlert('success', t('cloud.dedupDoneTitle'), t('cloud.dedupDoneDesc', { count: String(result.removed) }));
+      } else {
+        showAlert('info', t('cloud.dedupNoneTitle'), t('cloud.dedupNoneDesc'));
+      }
+    } catch (err: any) {
+      showAlert('error', 'Error', err.message || 'No se pudieron eliminar los duplicados');
+    }
+  }
+
   return {
     loadCloudBooks, downloadBookFromCloud, deleteCloudBook,
     startEditCloudBook, saveCloudBookEdit, autoEnqueueNewBooks,
+    removeCloudDuplicates,
   };
 }

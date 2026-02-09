@@ -11,6 +11,7 @@ import { LibraryView } from '@/views/LibraryView';
 import { CloudView } from '@/views/CloudView';
 import { GamificationView } from '@/views/GamificationView';
 import { SettingsView } from '@/views/SettingsView';
+import { QueueView } from '@/views/QueueView';
 import { AppShell } from '@/components/layout/AppShell';
 import { AlertModal } from '@/components/shared/AlertModal';
 import { LanguageModal } from '@/components/shared/LanguageModal';
@@ -52,6 +53,7 @@ function App() {
         {activeTab === 'library' && <LibraryView />}
         {activeTab === 'cloud' && <CloudView />}
         {activeTab === 'gamification' && <GamificationView />}
+        {activeTab === 'queue' && <QueueView />}
         {activeTab === 'settings' && <SettingsView />}
       </AppShell>
       <AlertModal />

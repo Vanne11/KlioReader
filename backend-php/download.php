@@ -38,7 +38,7 @@ function detect_platform($name) {
     if (strpos($name, '.msi') !== false || strpos($name, 'windows') !== false || strpos($name, '.exe') !== false) return 'Windows';
     if (strpos($name, '.dmg') !== false || strpos($name, 'macos') !== false || strpos($name, 'darwin') !== false) return 'macOS';
     if (strpos($name, '.appimage') !== false || strpos($name, '.deb') !== false || strpos($name, '.rpm') !== false || strpos($name, 'linux') !== false) return 'Linux';
-    return 'Otro';
+    return t('platform_other');
 }
 
 function platform_icon($platform) {
@@ -50,7 +50,7 @@ function platform_icon($platform) {
     }
 }
 
-$pageTitle = 'Descargas';
+$pageTitle = t('downloads_title');
 require_once __DIR__ . '/templates/base.php';
 require_once __DIR__ . '/templates/header-public.php';
 ?>
@@ -58,23 +58,23 @@ require_once __DIR__ . '/templates/header-public.php';
 <section class="py-16">
     <div class="max-w-4xl mx-auto px-6">
         <div class="text-center mb-12">
-            <h1 class="text-3xl md:text-4xl font-bold mb-4">Descargas</h1>
-            <p class="text-klio-muted">Descarga KlioReader para tu plataforma</p>
+            <h1 class="text-3xl md:text-4xl font-bold mb-4"><?php echo e(t('downloads_title')); ?></h1>
+            <p class="text-klio-muted"><?php echo e(t('downloads_subtitle')); ?></p>
         </div>
 
         <?php if ($fetchError && empty($releases)): ?>
         <div class="glass rounded-xl p-8 text-center">
-            <p class="text-klio-muted mb-4">No se pudieron obtener las releases en este momento.</p>
+            <p class="text-klio-muted mb-4"><?php echo e(t('downloads_error_fetch')); ?></p>
             <a href="https://github.com/Vanne11/KlioReader/releases" target="_blank" rel="noopener"
                class="inline-block px-6 py-3 rounded-lg bg-klio-primary text-klio-bg font-semibold hover:opacity-90 transition-opacity">
-                Ver en GitHub
+                <?php echo e(t('btn_view_github')); ?>
             </a>
         </div>
         <?php elseif (empty($releases)): ?>
         <div class="glass rounded-xl p-8 text-center">
-            <p class="text-klio-muted mb-4">Aun no hay releases disponibles.</p>
+            <p class="text-klio-muted mb-4"><?php echo e(t('downloads_no_releases')); ?></p>
             <a href="https://github.com/Vanne11/KlioReader" target="_blank" rel="noopener"
-               class="text-klio-primary hover:underline">Visita el repositorio</a>
+               class="text-klio-primary hover:underline"><?php echo e(t('downloads_visit_repo')); ?></a>
         </div>
         <?php else: ?>
 
@@ -87,15 +87,15 @@ require_once __DIR__ . '/templates/header-public.php';
                             <?php echo e($release['tag_name'] ?? ''); ?>
                         </h2>
                         <?php if ($idx === 0): ?>
-                        <span class="px-2 py-0.5 rounded-full text-xs bg-klio-primary/15 text-klio-primary">Ultima</span>
+                        <span class="px-2 py-0.5 rounded-full text-xs bg-klio-primary/15 text-klio-primary"><?php echo e(t('downloads_badge_latest')); ?></span>
                         <?php endif; ?>
                         <?php if (!empty($release['prerelease'])): ?>
-                        <span class="px-2 py-0.5 rounded-full text-xs bg-yellow-500/15 text-yellow-400">Pre-release</span>
+                        <span class="px-2 py-0.5 rounded-full text-xs bg-yellow-500/15 text-yellow-400"><?php echo e(t('downloads_badge_prerelease')); ?></span>
                         <?php endif; ?>
                     </div>
                     <p class="text-klio-muted text-sm mt-1"><?php echo e($release['name'] ?? ''); ?></p>
                     <p class="text-klio-muted text-xs mt-1">
-                        Publicado: <?php echo e(substr($release['published_at'] ?? '', 0, 10)); ?>
+                        <?php echo e(t('downloads_published')); ?> <?php echo e(substr($release['published_at'] ?? '', 0, 10)); ?>
                     </p>
                 </div>
             </div>
@@ -127,7 +127,7 @@ require_once __DIR__ . '/templates/header-public.php';
                 <?php endforeach; ?>
             </div>
             <?php else: ?>
-            <p class="text-klio-muted text-sm">Sin archivos adjuntos para esta release.</p>
+            <p class="text-klio-muted text-sm"><?php echo e(t('downloads_no_assets')); ?></p>
             <?php endif; ?>
         </div>
         <?php endforeach; ?>
@@ -135,7 +135,7 @@ require_once __DIR__ . '/templates/header-public.php';
         <div class="text-center mt-8">
             <a href="https://github.com/Vanne11/KlioReader/releases" target="_blank" rel="noopener"
                class="text-klio-primary text-sm hover:underline">
-                Ver todas las releases en GitHub &rarr;
+                <?php echo e(t('downloads_all_github')); ?> &rarr;
             </a>
         </div>
 

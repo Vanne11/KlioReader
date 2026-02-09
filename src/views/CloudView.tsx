@@ -44,7 +44,7 @@ export function CloudView() {
   const { challenges, pendingChallengesCount: pendingChallenges, currentLeaderboard, challengeTab, setChallengeTab } = useSocialStore();
 
   const { handleAuth, saveProfile, handleDeleteAccount } = useAuth();
-  const { loadCloudBooks, downloadBookFromCloud, deleteCloudBook, startEditCloudBook, saveCloudBookEdit } = useCloudBooks();
+  const { loadCloudBooks, downloadBookFromCloud, deleteCloudBook, startEditCloudBook, saveCloudBookEdit, removeCloudDuplicates } = useCloudBooks();
   const { loadPendingShares, handleAcceptShare, handleRejectShare, handleShareSearch, handleSendShare, openShareDialog, loadAllSharedProgress } = useShares();
   const { createRace, loadLeaderboard } = useRaces();
   const { loadChallenges, handleAcceptChallenge, handleRejectChallenge, createChallenge, checkChallengeStatus } = useChallenges();
@@ -65,6 +65,8 @@ export function CloudView() {
   const [newCollectionType, setNewCollectionType] = useState<'saga' | 'collection'>('collection');
   const [addingToCollectionId, setAddingToCollectionId] = useState<number | null>(null);
   const [collectionShareSearch, setCollectionShareSearch] = useState('');
+  const [showDedupConfirm, setShowDedupConfirm] = useState(false);
+  const hasDuplicates = cloudBooks.some(cb => cb.is_duplicate);
 
   // Auto-refresh al entrar a la pestaña Nube
   useEffect(() => {
@@ -159,9 +161,16 @@ export function CloudView() {
                 <h2 className="text-lg font-bold flex items-center gap-2"><Cloud className="w-5 h-5 text-blue-400" /> {t('cloud.myCloudBooks')}</h2>
                 <p className="text-xs opacity-50 mt-1">{t('cloud.syncedBooks', { count: cloudBooks.length })}</p>
               </div>
-              <Button variant="outline" size="sm" onClick={loadCloudBooks} disabled={cloudLoading}>
-                {cloudLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Cloud className="w-4 h-4 mr-2" />} {t('app.refresh')}
-              </Button>
+              <div className="flex gap-2">
+                {hasDuplicates && (
+                  <Button variant="outline" size="sm" className="text-amber-400 border-amber-400/40 hover:bg-amber-400/10" onClick={() => setShowDedupConfirm(true)}>
+                    <AlertTriangle className="w-4 h-4 mr-2" /> {t('cloud.dedupButton')}
+                  </Button>
+                )}
+                <Button variant="outline" size="sm" onClick={loadCloudBooks} disabled={cloudLoading}>
+                  {cloudLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Cloud className="w-4 h-4 mr-2" />} {t('app.refresh')}
+                </Button>
+              </div>
             </div>
 
             {cloudBooks.length === 0 ? (
@@ -654,6 +663,28 @@ export function CloudView() {
               <div className="flex gap-2 w-full pt-2">
                 <Button variant="outline" className="flex-1 border-white/10" onClick={() => setShowDeleteConfirm(false)}>{t('app.cancel')}</Button>
                 <Button className="flex-1 bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 font-bold" onClick={handleDeleteAccount}>{t('app.delete')}</Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+        {/* Remove Duplicates Confirmation */}
+        <Dialog open={showDedupConfirm} onOpenChange={setShowDedupConfirm}>
+          <DialogContent className="sm:max-w-[400px] bg-[#16161e] border-white/10 text-white">
+            <div className="flex flex-col items-center text-center py-6 space-y-4">
+              <div className="w-16 h-16 rounded-full bg-amber-500/10 flex items-center justify-center"><AlertTriangle className="w-8 h-8 text-amber-400" /></div>
+              <DialogHeader><DialogTitle className="text-lg font-bold text-amber-400">{t('cloud.dedupConfirmTitle')}</DialogTitle></DialogHeader>
+              <p className="text-sm opacity-70">{t('cloud.dedupConfirmDesc')}</p>
+              <div className="w-full max-h-32 overflow-y-auto space-y-1">
+                {cloudBooks.filter(cb => cb.is_duplicate).map(cb => (
+                  <div key={cb.id} className="flex items-center gap-2 bg-amber-500/5 rounded px-3 py-1.5 text-xs">
+                    <span className="truncate flex-1 text-left">{cb.title}</span>
+                    <Badge variant="outline" className="text-[8px] h-4 text-amber-400 border-amber-400/40 shrink-0">{t('cloud.duplicate')}</Badge>
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-2 w-full pt-2">
+                <Button variant="outline" className="flex-1 border-white/10" onClick={() => setShowDedupConfirm(false)}>{t('app.cancel')}</Button>
+                <Button className="flex-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 border border-amber-500/30 font-bold" onClick={() => { setShowDedupConfirm(false); removeCloudDuplicates(); }}>{t('app.delete')}</Button>
               </div>
             </div>
           </DialogContent>

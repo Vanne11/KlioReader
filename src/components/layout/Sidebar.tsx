@@ -1,7 +1,7 @@
 import {
   BookOpen, Trophy, Library, Cloud, Settings2,
   LogIn, LogOut, User, Crown, X,
-  RefreshCw, WifiOff, Check, HardDrive,
+  RefreshCw, WifiOff, Check, HardDrive, ListOrdered,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +16,7 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import { useSharesStore } from '@/stores/sharesStore';
 import { useSocialStore } from '@/stores/socialStore';
 import { useCollectionsStore } from '@/stores/collectionsStore';
+import { useCloudStore } from '@/stores/cloudStore';
 import { useAuth } from '@/hooks/useAuth';
 import { useShares } from '@/hooks/useShares';
 import { getUserTitle, getBadgeImageUrl, RARITY_CONFIG } from '@/lib/gamification';
@@ -39,6 +40,7 @@ export function Sidebar({ onClose }: SidebarProps) {
   const pendingSharesCount = useSharesStore(s => s.pendingSharesCount);
   const pendingChallengesCount = useSocialStore(s => s.pendingChallengesCount);
   const pendingCollectionSharesCount = useCollectionsStore(s => s.pendingCollectionSharesCount);
+  const queueCount = useCloudStore(s => s.queueCount);
   const socialStats = useGamificationStore(s => s.socialStats);
   const { handleLogout, loadProfile } = useAuth();
   const { loadPendingShares } = useShares();
@@ -66,6 +68,10 @@ export function Sidebar({ onClose }: SidebarProps) {
           {(pendingSharesCount + pendingChallengesCount + pendingCollectionSharesCount) > 0 && <span className="absolute right-2 top-1/2 -translate-y-1/2 bg-red-500 text-white text-[9px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">{pendingSharesCount + pendingChallengesCount + pendingCollectionSharesCount}</span>}
         </Button>
         <Button variant={activeTab === "gamification" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => navigate("gamification")}><Trophy className="w-5 h-5 text-yellow-500" /> {t('sidebar.myProgress')}</Button>
+        <Button variant={activeTab === "queue" ? "secondary" : "ghost"} className="w-full justify-start gap-3 relative" onClick={() => navigate("queue")}>
+          <ListOrdered className="w-5 h-5 text-orange-400" /> {t('sidebar.queue')}
+          {queueCount > 0 && <span className="absolute right-2 top-1/2 -translate-y-1/2 bg-orange-500 text-white text-[9px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">{queueCount}</span>}
+        </Button>
         <Button variant={activeTab === "settings" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => navigate("settings")}><Settings2 className="w-5 h-5 text-zinc-400" /> {t('sidebar.settings')}</Button>
       </nav>
       <div className="p-6 mt-auto border-t border-white/5">

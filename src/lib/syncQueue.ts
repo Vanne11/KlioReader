@@ -6,7 +6,7 @@ const STORAGE_KEY = "klio_sync_queue";
 const MAX_RETRIES = 5;
 const PROCESS_INTERVAL = 5_000; // 5s
 
-export type SyncOpType = "upload_book" | "sync_progress" | "sync_stats" | "sync_title";
+export type SyncOpType = "upload_book" | "sync_progress" | "sync_stats" | "sync_title" | "sync_collections";
 
 export interface SyncOp {
   id: string;
@@ -25,8 +25,12 @@ let _getBooksRef: (() => any[]) | null = null;
 export function setBooksRef(cb: () => any[]) { _getBooksRef = cb; }
 
 // ── Callback para notificar cambios en la cola ──
-let _onQueueChange: ((count: number, summary: string) => void) | null = null;
-export function setOnQueueChange(cb: (count: number, summary: string) => void) { _onQueueChange = cb; }
+let _onQueueChange: ((count: number, summary: string, items: SyncOp[]) => void) | null = null;
+export function setOnQueueChange(cb: (count: number, summary: string, items: SyncOp[]) => void) { _onQueueChange = cb; }
+
+// ── Callback para notificar qué item se está procesando ──
+let _onProcessingChange: ((id: string | null) => void) | null = null;
+export function setOnProcessingChange(cb: (id: string | null) => void) { _onProcessingChange = cb; }
 
 // ── Persistencia ──
 function loadQueue(): SyncOp[] {
@@ -43,9 +47,10 @@ function saveQueue(queue: SyncOp[]) {
     sync_progress: 'Sincronizando progreso',
     sync_stats: 'Sincronizando estadísticas',
     sync_title: 'Sincronizando título',
+    sync_collections: 'Sincronizando colecciones',
   };
   const summary = queue.length > 0 ? labels[queue[0].type] || 'Sincronizando...' : '';
-  _onQueueChange?.(queue.length, summary);
+  _onQueueChange?.(queue.length, summary, queue);
 }
 
 // ── Deduplicación ──
@@ -67,6 +72,9 @@ function deduplicate(queue: SyncOp[], op: SyncOp): SyncOp[] {
       return queue.filter(q =>
         !(q.type === "upload_book" && q.payload.bookPath === op.payload.bookPath)
       );
+    case "sync_collections":
+      // Solo mantener uno
+      return queue.filter(q => q.type !== "sync_collections");
     default:
       return queue;
   }
@@ -101,9 +109,89 @@ export function getQueueSummary(): string {
     sync_progress: 'Sincronizando progreso',
     sync_stats: 'Sincronizando estadísticas',
     sync_title: 'Sincronizando título',
+    sync_collections: 'Sincronizando colecciones',
   };
   // Show the first (currently processing) operation
   return labels[queue[0].type] || 'Sincronizando...';
+}
+
+export function getQueue(): SyncOp[] {
+  return loadQueue();
+}
+
+export function removeFromQueue(id: string) {
+  let queue = loadQueue();
+  queue = queue.filter(q => q.id !== id);
+  saveQueue(queue);
+}
+
+export function clearQueue() {
+  saveQueue([]);
+}
+
+// ── Sync colecciones locales → cloud ──
+async function syncLocalCollectionsToCloud() {
+  // Leer colecciones locales desde localStorage
+  let localCollections: any[] = [];
+  try {
+    const raw = localStorage.getItem('klioLocalCollections');
+    localCollections = raw ? JSON.parse(raw) : [];
+  } catch { return; }
+
+  if (localCollections.length === 0) return;
+
+  // Obtener colecciones y libros cloud actuales
+  const [cloudCollections, cloudBooks] = await Promise.all([
+    api.listCollections(),
+    api.listBooks(),
+  ]);
+
+  for (const local of localCollections) {
+    // Verificar si ya existe una colección cloud con el mismo nombre y tipo
+    const existing = cloudCollections.find(
+      (c: any) => c.name === local.name && c.type === local.type
+    );
+
+    let collectionId: number;
+
+    if (existing) {
+      collectionId = existing.id;
+    } else {
+      // Crear colección cloud
+      const res = await api.createCollection({
+        name: local.name,
+        type: local.type || 'collection',
+        description: local.description || undefined,
+        cover_base64: local.coverBase64 || undefined,
+        sort_order: local.sortOrder || 'manual',
+      });
+      collectionId = res.id;
+    }
+
+    // Resolver book IDs: las colecciones locales usan paths, la nube usa IDs
+    const bookIdsToAdd: number[] = [];
+    for (const entry of (local.bookEntries || [])) {
+      // bookId local es el path del archivo, necesitamos encontrar el cloud book por título
+      const fileName = (entry.bookId as string).split('/').pop() || '';
+      // Buscar en cloudBooks por file_name o título similar
+      const cloudBook = cloudBooks.find((cb: any) => {
+        if (cb.file_name === fileName) return true;
+        // Fallback: comparar título normalizado
+        const localTitle = fileName.replace(/\.[^.]+$/, '').toLowerCase();
+        return cb.title.toLowerCase() === localTitle;
+      });
+      if (cloudBook) {
+        bookIdsToAdd.push(cloudBook.id);
+      }
+    }
+
+    if (bookIdsToAdd.length > 0) {
+      // addBooksToCollection usa INSERT OR IGNORE, así que es seguro re-enviar
+      await api.addBooksToCollection(collectionId, bookIdsToAdd);
+    }
+  }
+
+  console.log(`[SyncQueue] Colecciones sincronizadas: ${localCollections.length}`);
 }
 
 // ── Procesamiento ──
@@ -145,6 +233,32 @@ async function processOne(op: SyncOp): Promise<boolean> {
 
     case "upload_book": {
       const { bookPath, title, author, total_chapters, description, fileType } = op.payload;
+
+      // Si el archivo ya no existe en disco, descartar silenciosamente
+      try {
+        const exists: boolean = await invoke("file_exists", { path: bookPath });
+        if (!exists) {
+          console.log(`[SyncQueue] Skip upload: archivo no existe en disco "${bookPath}"`);
+          return true;
+        }
+      } catch { /* si falla file_exists, continuar e intentar leer */ }
+
+      // Verificación pre-upload: comprobar si el libro ya existe en la nube
+      try {
+        const cloudBooks = await api.listBooks();
+        const normTitle = title.toLowerCase().trim().replace(/\s+/g, ' ').replace(/[^\p{L}\p{N}\s]/gu, '');
+        const normAuthor = author.toLowerCase().trim().replace(/\s+/g, ' ').replace(/[^\p{L}\p{N}\s]/gu, '');
+        const alreadyExists = cloudBooks.some((cb: any) => {
+          const cbTitle = cb.title.toLowerCase().trim().replace(/\s+/g, ' ').replace(/[^\p{L}\p{N}\s]/gu, '');
+          const cbAuthor = cb.author.toLowerCase().trim().replace(/\s+/g, ' ').replace(/[^\p{L}\p{N}\s]/gu, '');
+          return cbTitle === normTitle && cbAuthor === normAuthor;
+        });
+        if (alreadyExists) {
+          console.log(`[SyncQueue] Skip upload: "${title}" ya existe en la nube`);
+          return true;
+        }
+      } catch { /* si falla la verificación, continuar con el upload normal */ }
+
       // Leer metadata fresca del libro (no guardamos cover en la cola)
       let cover: string | undefined;
       try {
@@ -173,6 +287,11 @@ async function processOne(op: SyncOp): Promise<boolean> {
       return true;
     }
 
+    case "sync_collections": {
+      await syncLocalCollectionsToCloud();
+      return true;
+    }
+
     default:
       return true; // Op desconocida, descartar
   }
@@ -191,6 +310,7 @@ export async function processQueue() {
     const snapshot = [...queue];
     for (const op of snapshot) {
       console.log(`[SyncQueue] Procesando: ${op.type}`, op.payload.bookPath || op.payload.bookTitle || '');
+      _onProcessingChange?.(op.id);
       try {
         const ok = await processOne(op);
         if (ok) {
@@ -216,6 +336,7 @@ export async function processQueue() {
       }
     }
   } finally {
+    _onProcessingChange?.(null);
     _processing = false;
   }
 }

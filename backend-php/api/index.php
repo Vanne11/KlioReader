@@ -65,6 +65,7 @@ $router->delete('/user/delete', AuthMiddleware::wrap(array('UserController', 'de
 $router->get('/books', AuthMiddleware::wrap(array('BookController', 'listBooks')));
 $router->post('/books/check-hash', AuthMiddleware::wrap(array('BookController', 'checkHash')));
 $router->post('/books/upload', AuthMiddleware::wrap(array('BookController', 'upload')));
+$router->post('/books/remove-duplicates', AuthMiddleware::wrap(array('BookController', 'removeDuplicates')));
 $router->get('/books/{id}', AuthMiddleware::wrap(array('BookController', 'get')));
 $router->put('/books/{id}', AuthMiddleware::wrap(array('BookController', 'update')));
 $router->get('/books/{id}/download', AuthMiddleware::wrap(array('BookController', 'download')));
