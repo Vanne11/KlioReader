@@ -92,4 +92,28 @@ $router->post('/shares/{id}/accept', AuthMiddleware::wrap(array('ShareController
 $router->post('/shares/{id}/reject', AuthMiddleware::wrap(array('ShareController', 'rejectShare')));
 $router->get('/books/{id}/shared-progress', AuthMiddleware::wrap(array('ShareController', 'sharedProgress')));
 
+// -- Carreras de lectura (protegido) --
+$router->post('/books/{id}/races', AuthMiddleware::wrap(array('ShareController', 'createRace')));
+$router->post('/races/{id}/join', AuthMiddleware::wrap(array('ShareController', 'joinRace')));
+$router->get('/races/{id}/leaderboard', AuthMiddleware::wrap(array('ShareController', 'raceLeaderboard')));
+$router->post('/races/{id}/finish', AuthMiddleware::wrap(array('ShareController', 'finishRace')));
+
+// -- Retos entre amigos (protegido) --
+$router->post('/books/{id}/challenges', AuthMiddleware::wrap(array('ShareController', 'createChallenge')));
+$router->get('/challenges', AuthMiddleware::wrap(array('ShareController', 'listChallenges')));
+$router->get('/challenges/pending/count', AuthMiddleware::wrap(array('ShareController', 'pendingChallengesCount')));
+$router->post('/challenges/{id}/accept', AuthMiddleware::wrap(array('ShareController', 'acceptChallenge')));
+$router->post('/challenges/{id}/reject', AuthMiddleware::wrap(array('ShareController', 'rejectChallenge')));
+$router->get('/challenges/{id}/status', AuthMiddleware::wrap(array('ShareController', 'challengeStatus')));
+
+// -- Notas compartidas y de voz (protegido) --
+$router->put('/notes/{id}/share', AuthMiddleware::wrap(array('BookController', 'toggleNoteShared')));
+$router->get('/books/{id}/shared-notes', AuthMiddleware::wrap(array('BookController', 'getSharedNotes')));
+$router->post('/books/{id}/voice-notes', AuthMiddleware::wrap(array('BookController', 'uploadVoiceNote')));
+$router->get('/voice-notes/{id}/audio', AuthMiddleware::wrap(array('BookController', 'streamVoiceAudio')));
+$router->delete('/voice-notes/{id}', AuthMiddleware::wrap(array('BookController', 'deleteVoiceNote')));
+
+// -- Social stats (protegido) --
+$router->get('/user/social-stats', AuthMiddleware::wrap(array('UserController', 'socialStats')));
+
 $router->resolve();

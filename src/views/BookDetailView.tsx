@@ -16,7 +16,7 @@ export function BookDetailView() {
   if (!selectedBook) return null;
 
   return (
-    <div className="flex flex-col h-screen bg-[#0f0f14] text-white font-sans overflow-hidden relative">
+    <div className="flex flex-col h-screen bg-[#0f0f14] text-white font-sans overflow-hidden relative" style={{ paddingTop: 'var(--sat)', paddingBottom: 'var(--sab)' }}>
       <div className="absolute inset-0 opacity-20 pointer-events-none overflow-hidden">
         {selectedBook.cover && (
           <img src={coverSrc(selectedBook.cover)} className="w-full h-full object-cover blur-[100px] scale-150" alt="" />

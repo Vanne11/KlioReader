@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useCloudStore } from '@/stores/cloudStore';
 import { useCloudBooks } from './useCloudBooks';
 import { useShares } from './useShares';
+import { useChallenges } from './useChallenges';
 import { useAuth } from './useAuth';
 import { useSyncEvents } from './useStorageSync';
 import { buildInvokeConfig } from '@/lib/constants';
@@ -37,6 +38,7 @@ export function usePersistence() {
 
   const { loadCloudBooks, autoEnqueueNewBooks } = useCloudBooks();
   const { loadPendingSharesCount } = useShares();
+  const { loadPendingCount: loadPendingChallengesCount } = useChallenges();
   const { loadProfile } = useAuth();
 
   // Sync events listener
@@ -120,6 +122,7 @@ export function usePersistence() {
     if (authUser) {
       loadCloudBooks();
       loadPendingSharesCount();
+      loadPendingChallengesCount();
     }
   }, [authUser]);
 

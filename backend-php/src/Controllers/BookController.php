@@ -702,4 +702,320 @@ class BookController
         $stmt->execute(array($params['id'], $params['user_id']));
         echo json_encode(array('ok' => true));
     }
+
+    // PUT /api/notes/{id}/share — Toggle is_shared
+    public function toggleNoteShared($params)
+    {
+        $noteId = $params['id'];
+        $userId = $params['user_id'];
+        $db = Database::get();
+
+        $stmt = $db->prepare('SELECT id, is_shared FROM notes WHERE id = ? AND user_id = ?');
+        $stmt->execute(array($noteId, $userId));
+        $note = $stmt->fetch();
+
+        if (!$note) {
+            http_response_code(404);
+            echo json_encode(array('error' => 'Nota no encontrada'));
+            return;
+        }
+
+        $newValue = (int)$note['is_shared'] === 1 ? 0 : 1;
+        $db->prepare('UPDATE notes SET is_shared = ? WHERE id = ?')->execute(array($newValue, $noteId));
+
+        // Actualizar social_stats si se compartió
+        if ($newValue === 1) {
+            $db->prepare('INSERT OR IGNORE INTO social_stats (user_id) VALUES (?)')->execute(array($userId));
+            $db->prepare('UPDATE social_stats SET shared_notes_count = shared_notes_count + 1 WHERE user_id = ?')->execute(array($userId));
+        } else {
+            $db->prepare('UPDATE social_stats SET shared_notes_count = MAX(0, shared_notes_count - 1) WHERE user_id = ?')->execute(array($userId));
+        }
+
+        echo json_encode(array('ok' => true, 'is_shared' => $newValue));
+    }
+
+    // GET /api/books/{id}/shared-notes — Notas compartidas de todos los usuarios que comparten el libro
+    public function getSharedNotes($params)
+    {
+        $bookId = $params['id'];
+        $userId = $params['user_id'];
+        $db = Database::get();
+
+        // Obtener stored_file_id del libro
+        $stmt = $db->prepare('SELECT stored_file_id FROM books WHERE id = ? AND user_id = ?');
+        $stmt->execute(array($bookId, $userId));
+        $book = $stmt->fetch();
+
+        if (!$book || empty($book['stored_file_id'])) {
+            echo json_encode(array());
+            return;
+        }
+
+        $storedFileId = (int)$book['stored_file_id'];
+
+        // Buscar usuarios con relación aceptada via book_shares
+        $stmt = $db->prepare('
+            SELECT from_user_id, to_user_id FROM book_shares
+            WHERE stored_file_id = ? AND status = ? AND (from_user_id = ? OR to_user_id = ?)
+        ');
+        $stmt->execute(array($storedFileId, 'accepted', $userId, $userId));
+        $relations = $stmt->fetchAll();
+
+        $connectedIds = array();
+        foreach ($relations as $rel) {
+            $otherId = ((int)$rel['from_user_id'] === (int)$userId) ? (int)$rel['to_user_id'] : (int)$rel['from_user_id'];
+            $connectedIds[$otherId] = true;
+        }
+
+        if (empty($connectedIds)) {
+            echo json_encode(array());
+            return;
+        }
+
+        $result = array();
+        foreach (array_keys($connectedIds) as $connId) {
+            // Buscar el book_id de este usuario para este stored_file_id
+            $stmt = $db->prepare('SELECT id FROM books WHERE user_id = ? AND stored_file_id = ?');
+            $stmt->execute(array($connId, $storedFileId));
+            $theirBook = $stmt->fetch();
+            if (!$theirBook) continue;
+
+            // Obtener notas compartidas
+            $stmt = $db->prepare('
+                SELECT n.id, n.chapter_index, n.content, n.highlight_text, n.color, n.audio_path, n.audio_duration, n.created_at,
+                       u.username, u.avatar
+                FROM notes n
+                JOIN users u ON u.id = n.user_id
+                WHERE n.book_id = ? AND n.user_id = ? AND n.is_shared = 1
+                ORDER BY n.chapter_index, n.created_at
+            ');
+            $stmt->execute(array($theirBook['id'], $connId));
+            $notes = $stmt->fetchAll();
+
+            foreach ($notes as &$n) {
+                $n['id'] = (int)$n['id'];
+                $n['chapter_index'] = (int)$n['chapter_index'];
+                $n['user_id'] = (int)$connId;
+                $n['audio_duration'] = $n['audio_duration'] !== null ? (int)$n['audio_duration'] : null;
+                $n['has_audio'] = !empty($n['audio_path']);
+                unset($n['audio_path']); // No exponer path, usar endpoint de streaming
+            }
+            unset($n);
+
+            $result = array_merge($result, $notes);
+        }
+
+        echo json_encode($result);
+    }
+
+    // POST /api/books/{id}/voice-notes — Subir nota de voz (solo suscriptores)
+    public function uploadVoiceNote($params)
+    {
+        $bookId = $params['id'];
+        $userId = $params['user_id'];
+        $db = Database::get();
+
+        // Verificar is_subscriber
+        $stmt = $db->prepare('SELECT is_subscriber FROM users WHERE id = ?');
+        $stmt->execute(array($userId));
+        $user = $stmt->fetch();
+        if (!$user || (int)$user['is_subscriber'] !== 1) {
+            http_response_code(403);
+            echo json_encode(array('error' => 'Solo los suscriptores pueden crear notas de voz'));
+            return;
+        }
+
+        // Verificar límite (50 notas de voz por libro)
+        $stmt = $db->prepare('SELECT COUNT(*) FROM notes WHERE book_id = ? AND user_id = ? AND audio_path IS NOT NULL');
+        $stmt->execute(array($bookId, $userId));
+        $voiceCount = (int)$stmt->fetchColumn();
+        if ($voiceCount >= 50) {
+            http_response_code(422);
+            echo json_encode(array('error' => 'Límite de 50 notas de voz por libro alcanzado'));
+            return;
+        }
+
+        if (!isset($_FILES['audio'])) {
+            http_response_code(422);
+            echo json_encode(array('error' => 'No se envió archivo de audio'));
+            return;
+        }
+
+        $audioFile = $_FILES['audio'];
+
+        // Validar Content-Type
+        $allowedTypes = array('audio/webm', 'audio/ogg', 'audio/webm;codecs=opus', 'application/ogg');
+        $fileType = $audioFile['type'];
+        $typeOk = false;
+        foreach ($allowedTypes as $at) {
+            if (strpos($fileType, $at) !== false || strpos($at, $fileType) !== false) {
+                $typeOk = true;
+                break;
+            }
+        }
+        if (!$typeOk) {
+            // Check extension as fallback
+            $ext = strtolower(pathinfo($audioFile['name'], PATHINFO_EXTENSION));
+            if (!in_array($ext, array('webm', 'ogg'))) {
+                http_response_code(422);
+                echo json_encode(array('error' => 'Solo se permiten archivos audio webm/ogg'));
+                return;
+            }
+        }
+
+        // Max 50KB
+        if ($audioFile['size'] > 51200) {
+            http_response_code(422);
+            echo json_encode(array('error' => 'El audio excede el tamaño máximo (50KB)'));
+            return;
+        }
+
+        $duration = isset($_POST['duration']) ? (int)$_POST['duration'] : 0;
+        if ($duration > 10) {
+            http_response_code(422);
+            echo json_encode(array('error' => 'La nota de voz no puede exceder 10 segundos'));
+            return;
+        }
+
+        $chapterIndex = isset($_POST['chapter_index']) ? (int)$_POST['chapter_index'] : 0;
+        $content = isset($_POST['content']) ? trim($_POST['content']) : '';
+
+        // Guardar audio
+        $ext = strtolower(pathinfo($audioFile['name'], PATHINFO_EXTENSION));
+        if (empty($ext)) $ext = 'webm';
+        $audioName = 'voice_' . $userId . '_' . time() . '.' . $ext;
+        $audioDir = dirname(__DIR__, 2) . '/uploads/voice_notes';
+        if (!is_dir($audioDir)) mkdir($audioDir, 0755, true);
+        $audioPath = $audioDir . '/' . $audioName;
+
+        // Intentar subir via StorageManager, fallback a local
+        $storagePath = 'voice_notes/' . $audioName;
+        $sm = StorageManager::getInstance();
+        $driver = $sm->getDriver();
+        $activeProvider = $sm->getActiveProvider();
+
+        if ($activeProvider === 'local') {
+            move_uploaded_file($audioFile['tmp_name'], $audioPath);
+        } else {
+            // Guardar temporal y subir
+            move_uploaded_file($audioFile['tmp_name'], $audioPath);
+            $contentType = $ext === 'ogg' ? 'audio/ogg' : 'audio/webm';
+            $result = $driver->upload($audioPath, $storagePath, $contentType);
+            if ($result) {
+                @unlink($audioPath);
+            } else {
+                // Fallback local
+                $storagePath = 'voice_notes/' . $audioName;
+            }
+        }
+
+        // Crear nota con audio
+        $stmt = $db->prepare('
+            INSERT INTO notes (user_id, book_id, chapter_index, content, audio_path, audio_duration)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ');
+        $stmt->execute(array($userId, $bookId, $chapterIndex, $content, $storagePath, $duration));
+
+        http_response_code(201);
+        echo json_encode(array('id' => (int)$db->lastInsertId(), 'audio_duration' => $duration));
+    }
+
+    // GET /api/voice-notes/{id}/audio — Streaming audio
+    public function streamVoiceAudio($params)
+    {
+        $noteId = $params['id'];
+        $userId = $params['user_id'];
+        $db = Database::get();
+
+        // Obtener la nota
+        $stmt = $db->prepare('SELECT n.*, b.stored_file_id FROM notes n JOIN books b ON b.id = n.book_id WHERE n.id = ?');
+        $stmt->execute(array($noteId));
+        $note = $stmt->fetch();
+
+        if (!$note || empty($note['audio_path'])) {
+            http_response_code(404);
+            echo json_encode(array('error' => 'Nota de voz no encontrada'));
+            return;
+        }
+
+        // Verificar acceso: es dueño o tiene relación via shares + nota compartida
+        $isOwner = ((int)$note['user_id'] === (int)$userId);
+        if (!$isOwner) {
+            if ((int)$note['is_shared'] !== 1) {
+                http_response_code(403);
+                echo json_encode(array('error' => 'Sin acceso a esta nota'));
+                return;
+            }
+            // Verificar relación via shares
+            $storedFileId = $note['stored_file_id'];
+            if (!empty($storedFileId)) {
+                $stmt = $db->prepare('
+                    SELECT id FROM book_shares
+                    WHERE stored_file_id = ? AND status = ? AND (from_user_id = ? OR to_user_id = ?)
+                ');
+                $stmt->execute(array($storedFileId, 'accepted', $userId, $userId));
+                if (!$stmt->fetch()) {
+                    http_response_code(403);
+                    echo json_encode(array('error' => 'Sin acceso a esta nota'));
+                    return;
+                }
+            }
+        }
+
+        $audioPath = $note['audio_path'];
+        $ext = strtolower(pathinfo($audioPath, PATHINFO_EXTENSION));
+        $mime = ($ext === 'ogg') ? 'audio/ogg' : 'audio/webm';
+
+        // Intentar desde storage local
+        $localPath = dirname(__DIR__, 2) . '/uploads/' . $audioPath;
+        if (file_exists($localPath)) {
+            header('Content-Type: ' . $mime);
+            header('Content-Length: ' . filesize($localPath));
+            readfile($localPath);
+            exit;
+        }
+
+        // Intentar desde proveedor remoto
+        $sm = StorageManager::getInstance();
+        $driver = $sm->getDriver();
+        header('Content-Type: ' . $mime);
+        $driver->download($audioPath, null);
+        exit;
+    }
+
+    // DELETE /api/voice-notes/{id} — Eliminar nota de voz
+    public function deleteVoiceNote($params)
+    {
+        $noteId = $params['id'];
+        $userId = $params['user_id'];
+        $db = Database::get();
+
+        // Verificar que la nota pertenece al usuario
+        $stmt = $db->prepare('SELECT id, audio_path FROM notes WHERE id = ? AND user_id = ?');
+        $stmt->execute(array($noteId, $userId));
+        $note = $stmt->fetch();
+
+        if (!$note) {
+            http_response_code(404);
+            echo json_encode(array('error' => 'Nota no encontrada'));
+            return;
+        }
+
+        // Eliminar audio de storage
+        if (!empty($note['audio_path'])) {
+            $localPath = dirname(__DIR__, 2) . '/uploads/' . $note['audio_path'];
+            if (file_exists($localPath)) {
+                @unlink($localPath);
+            } else {
+                // Intentar eliminar de storage remoto
+                $sm = StorageManager::getInstance();
+                $driver = $sm->getDriver();
+                $driver->delete($note['audio_path'], null);
+            }
+        }
+
+        // Eliminar nota de BD
+        $db->prepare('DELETE FROM notes WHERE id = ? AND user_id = ?')->execute(array($noteId, $userId));
+        echo json_encode(array('ok' => true));
+    }
 }

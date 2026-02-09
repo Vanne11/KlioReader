@@ -4,6 +4,10 @@
 
 @layer base {
   :root {
+    --sat: env(safe-area-inset-top, 0px);
+    --sab: env(safe-area-inset-bottom, 0px);
+    --sal: env(safe-area-inset-left, 0px);
+    --sar: env(safe-area-inset-right, 0px);
     --background: 231 15% 18%;
     --foreground: 60 30% 96%;
     --card: 231 15% 18%;
@@ -30,6 +34,41 @@
 /* Limitar imágenes en contenido epub para que no excedan la página */
 .epub-reader-content img {
   max-height: 60vh !important;
+  object-fit: contain;
+}
+
+/* Paginación multi-column horizontal para EPUBs */
+.epub-paginated {
+  column-gap: 0px;
+  overflow: hidden;
+}
+
+.epub-paginated .epub-reader-content {
+  column-gap: inherit;
+}
+
+/* Evitar cortes de contenido a mitad de columna */
+.epub-paginated p,
+.epub-paginated h1,
+.epub-paginated h2,
+.epub-paginated h3,
+.epub-paginated h4,
+.epub-paginated h5,
+.epub-paginated h6,
+.epub-paginated img,
+.epub-paginated figure,
+.epub-paginated blockquote,
+.epub-paginated pre,
+.epub-paginated table,
+.epub-paginated ul,
+.epub-paginated ol,
+.epub-paginated li {
+  break-inside: avoid;
+}
+
+.epub-paginated img {
+  max-width: 100% !important;
+  max-height: 90% !important;
   object-fit: contain;
 }
 

@@ -320,4 +320,608 @@ class ShareController
 
         echo json_encode($result);
     }
+
+    // POST /api/books/{id}/races
+    public function createRace($params)
+    {
+        $bookId = $params['id'];
+        $userId = $params['user_id'];
+        $db = Database::get();
+
+        // Verificar que el libro existe y es del usuario, obtener stored_file_id
+        $stmt = $db->prepare('SELECT stored_file_id FROM books WHERE id = ? AND user_id = ?');
+        $stmt->execute(array($bookId, $userId));
+        $book = $stmt->fetch();
+
+        if (!$book) {
+            http_response_code(404);
+            echo json_encode(array('error' => 'Libro no encontrado'));
+            return;
+        }
+
+        if (empty($book['stored_file_id'])) {
+            http_response_code(422);
+            echo json_encode(array('error' => 'Este libro no tiene un archivo almacenado compartible'));
+            return;
+        }
+
+        $storedFileId = (int)$book['stored_file_id'];
+
+        // Crear carrera
+        $stmt = $db->prepare('INSERT INTO reading_races (stored_file_id, created_by) VALUES (?, ?)');
+        $stmt->execute(array($storedFileId, $userId));
+        $raceId = (int)$db->lastInsertId();
+
+        // Insertar al creador como participante
+        $stmt = $db->prepare('INSERT INTO race_participants (race_id, user_id) VALUES (?, ?)');
+        $stmt->execute(array($raceId, $userId));
+
+        // Actualizar social_stats
+        $db->prepare('INSERT OR IGNORE INTO social_stats (user_id) VALUES (?)')->execute(array($userId));
+        $db->prepare('UPDATE social_stats SET races_participated = races_participated + 1 WHERE user_id = ?')->execute(array($userId));
+
+        http_response_code(201);
+        echo json_encode(array('ok' => true, 'race_id' => $raceId));
+    }
+
+    // POST /api/races/{id}/join
+    public function joinRace($params)
+    {
+        $raceId = $params['id'];
+        $userId = $params['user_id'];
+        $db = Database::get();
+
+        // Verificar que la carrera existe y está activa
+        $stmt = $db->prepare('SELECT id, stored_file_id, status FROM reading_races WHERE id = ?');
+        $stmt->execute(array($raceId));
+        $race = $stmt->fetch();
+
+        if (!$race) {
+            http_response_code(404);
+            echo json_encode(array('error' => 'Carrera no encontrada'));
+            return;
+        }
+
+        if ($race['status'] !== 'active') {
+            http_response_code(422);
+            echo json_encode(array('error' => 'La carrera no está activa'));
+            return;
+        }
+
+        $storedFileId = (int)$race['stored_file_id'];
+
+        // Verificar que el usuario tiene acceso al libro
+        // Opción 1: tiene el libro con ese stored_file_id
+        $stmt = $db->prepare('SELECT id FROM books WHERE user_id = ? AND stored_file_id = ?');
+        $stmt->execute(array($userId, $storedFileId));
+        $hasBook = $stmt->fetch();
+
+        if (!$hasBook) {
+            // Opción 2: tiene acceso vía book_shares aceptado
+            $stmt = $db->prepare('SELECT id FROM book_shares WHERE stored_file_id = ? AND to_user_id = ? AND status = ?');
+            $stmt->execute(array($storedFileId, $userId, 'accepted'));
+            $hasShare = $stmt->fetch();
+
+            if (!$hasShare) {
+                http_response_code(403);
+                echo json_encode(array('error' => 'No tienes acceso a este libro'));
+                return;
+            }
+        }
+
+        // Insertar participante (INSERT OR IGNORE para evitar duplicados)
+        $stmt = $db->prepare('INSERT OR IGNORE INTO race_participants (race_id, user_id) VALUES (?, ?)');
+        $stmt->execute(array($raceId, $userId));
+
+        // Actualizar social_stats
+        $db->prepare('INSERT OR IGNORE INTO social_stats (user_id) VALUES (?)')->execute(array($userId));
+        $db->prepare('UPDATE social_stats SET races_participated = races_participated + 1 WHERE user_id = ?')->execute(array($userId));
+
+        echo json_encode(array('ok' => true));
+    }
+
+    // GET /api/races/{id}/leaderboard
+    public function raceLeaderboard($params)
+    {
+        $raceId = $params['id'];
+        $userId = $params['user_id'];
+        $db = Database::get();
+
+        // Verificar que la carrera existe
+        $stmt = $db->prepare('SELECT id, stored_file_id, created_by, status, winner_user_id FROM reading_races WHERE id = ?');
+        $stmt->execute(array($raceId));
+        $race = $stmt->fetch();
+
+        if (!$race) {
+            http_response_code(404);
+            echo json_encode(array('error' => 'Carrera no encontrada'));
+            return;
+        }
+
+        $storedFileId = (int)$race['stored_file_id'];
+
+        // Obtener participantes
+        $stmt = $db->prepare('
+            SELECT rp.user_id, u.username, u.avatar, rp.joined_at, rp.finished_at
+            FROM race_participants rp
+            JOIN users u ON u.id = rp.user_id
+            WHERE rp.race_id = ?
+        ');
+        $stmt->execute(array($raceId));
+        $participants = $stmt->fetchAll();
+
+        $leaderboard = array();
+
+        // Para cada participante, obtener su progreso
+        foreach ($participants as $p) {
+            $participantId = (int)$p['user_id'];
+
+            // Buscar su book_id con este stored_file_id
+            $stmt = $db->prepare('SELECT id FROM books WHERE user_id = ? AND stored_file_id = ?');
+            $stmt->execute(array($participantId, $storedFileId));
+            $book = $stmt->fetch();
+
+            $progressPercent = 0;
+
+            if ($book) {
+                $bookId = (int)$book['id'];
+                $stmt = $db->prepare('SELECT progress_percent FROM reading_progress WHERE book_id = ? AND user_id = ?');
+                $stmt->execute(array($bookId, $participantId));
+                $progress = $stmt->fetch();
+                if ($progress) {
+                    $progressPercent = (int)$progress['progress_percent'];
+                }
+            }
+
+            $leaderboard[] = array(
+                'user_id' => $participantId,
+                'username' => $p['username'],
+                'avatar' => $p['avatar'],
+                'joined_at' => $p['joined_at'],
+                'finished_at' => $p['finished_at'],
+                'progress_percent' => $progressPercent
+            );
+        }
+
+        // Ordenar por progreso DESC, joined_at ASC
+        usort($leaderboard, function ($a, $b) {
+            if ($a['progress_percent'] !== $b['progress_percent']) {
+                return $b['progress_percent'] - $a['progress_percent'];
+            }
+            return strcmp($a['joined_at'], $b['joined_at']);
+        });
+
+        echo json_encode(array(
+            'race' => array(
+                'id' => (int)$race['id'],
+                'stored_file_id' => $storedFileId,
+                'created_by' => (int)$race['created_by'],
+                'status' => $race['status'],
+                'winner_user_id' => $race['winner_user_id'] !== null ? (int)$race['winner_user_id'] : null
+            ),
+            'leaderboard' => $leaderboard
+        ));
+    }
+
+    // POST /api/races/{id}/finish
+    public function finishRace($params)
+    {
+        $raceId = $params['id'];
+        $userId = $params['user_id'];
+        $db = Database::get();
+
+        // Verificar que la carrera está activa
+        $stmt = $db->prepare('SELECT id, stored_file_id, status, winner_user_id FROM reading_races WHERE id = ?');
+        $stmt->execute(array($raceId));
+        $race = $stmt->fetch();
+
+        if (!$race) {
+            http_response_code(404);
+            echo json_encode(array('error' => 'Carrera no encontrada'));
+            return;
+        }
+
+        if ($race['status'] !== 'active') {
+            http_response_code(422);
+            echo json_encode(array('error' => 'La carrera no está activa'));
+            return;
+        }
+
+        // Verificar que el usuario es participante
+        $stmt = $db->prepare('SELECT id FROM race_participants WHERE race_id = ? AND user_id = ?');
+        $stmt->execute(array($raceId, $userId));
+        if (!$stmt->fetch()) {
+            http_response_code(403);
+            echo json_encode(array('error' => 'No eres participante de esta carrera'));
+            return;
+        }
+
+        $storedFileId = (int)$race['stored_file_id'];
+
+        // Verificar que el usuario tiene 100% de progreso
+        $stmt = $db->prepare('SELECT id FROM books WHERE user_id = ? AND stored_file_id = ?');
+        $stmt->execute(array($userId, $storedFileId));
+        $book = $stmt->fetch();
+
+        if (!$book) {
+            http_response_code(422);
+            echo json_encode(array('error' => 'No tienes este libro'));
+            return;
+        }
+
+        $bookId = (int)$book['id'];
+        $stmt = $db->prepare('SELECT progress_percent FROM reading_progress WHERE book_id = ? AND user_id = ?');
+        $stmt->execute(array($bookId, $userId));
+        $progress = $stmt->fetch();
+
+        if (!$progress || (int)$progress['progress_percent'] < 100) {
+            http_response_code(422);
+            echo json_encode(array('error' => 'Debes completar el libro al 100% para finalizar'));
+            return;
+        }
+
+        // Marcar como terminado
+        $stmt = $db->prepare('UPDATE race_participants SET finished_at = datetime(\'now\') WHERE race_id = ? AND user_id = ?');
+        $stmt->execute(array($raceId, $userId));
+
+        $isWinner = false;
+
+        // Si no hay ganador aún, este usuario es el ganador
+        if (empty($race['winner_user_id'])) {
+            $stmt = $db->prepare('UPDATE reading_races SET winner_user_id = ? WHERE id = ?');
+            $stmt->execute(array($userId, $raceId));
+
+            // Dar XP
+            $db->prepare('UPDATE users SET xp = xp + ? WHERE id = ?')->execute(array(100, $userId));
+
+            // Actualizar social_stats
+            $db->prepare('INSERT OR IGNORE INTO social_stats (user_id) VALUES (?)')->execute(array($userId));
+            $db->prepare('UPDATE social_stats SET races_won = races_won + 1 WHERE user_id = ?')->execute(array($userId));
+
+            $isWinner = true;
+        }
+
+        // Verificar si todos terminaron
+        $stmt = $db->prepare('SELECT COUNT(*) as total FROM race_participants WHERE race_id = ?');
+        $stmt->execute(array($raceId));
+        $totalCount = (int)$stmt->fetchColumn();
+
+        $stmt = $db->prepare('SELECT COUNT(*) as finished FROM race_participants WHERE race_id = ? AND finished_at IS NOT NULL');
+        $stmt->execute(array($raceId));
+        $finishedCount = (int)$stmt->fetchColumn();
+
+        if ($totalCount === $finishedCount) {
+            // Todos terminaron, marcar carrera como completada
+            $stmt = $db->prepare('UPDATE reading_races SET status = ?, completed_at = datetime(\'now\') WHERE id = ?');
+            $stmt->execute(array('completed', $raceId));
+        }
+
+        echo json_encode(array('ok' => true, 'is_winner' => $isWinner));
+    }
+
+    // POST /api/books/{id}/challenges
+    public function createChallenge($params)
+    {
+        $bookId = $params['id'];
+        $userId = $params['user_id'];
+        $data = json_decode(file_get_contents('php://input'), true);
+
+        $challengedId = isset($data['challenged_id']) ? (int)$data['challenged_id'] : 0;
+        $challengeType = isset($data['challenge_type']) ? trim($data['challenge_type']) : '';
+        $targetChapters = isset($data['target_chapters']) ? (int)$data['target_chapters'] : null;
+        $targetDays = isset($data['target_days']) ? (int)$data['target_days'] : null;
+
+        if ($challengedId === 0) {
+            http_response_code(422);
+            echo json_encode(array('error' => 'Destinatario del desafío no especificado'));
+            return;
+        }
+
+        if (!in_array($challengeType, array('chapters_in_days', 'finish_before'))) {
+            http_response_code(422);
+            echo json_encode(array('error' => 'Tipo de desafío inválido'));
+            return;
+        }
+
+        $db = Database::get();
+
+        // Verificar que el libro existe, obtener stored_file_id
+        $stmt = $db->prepare('SELECT stored_file_id FROM books WHERE id = ? AND user_id = ?');
+        $stmt->execute(array($bookId, $userId));
+        $book = $stmt->fetch();
+
+        if (!$book) {
+            http_response_code(404);
+            echo json_encode(array('error' => 'Libro no encontrado'));
+            return;
+        }
+
+        if (empty($book['stored_file_id'])) {
+            http_response_code(422);
+            echo json_encode(array('error' => 'Este libro no tiene un archivo almacenado compartible'));
+            return;
+        }
+
+        $storedFileId = (int)$book['stored_file_id'];
+
+        // Verificar que el destinatario tiene el mismo stored_file_id (vía shares o propietario)
+        $stmt = $db->prepare('SELECT id FROM books WHERE user_id = ? AND stored_file_id = ?');
+        $stmt->execute(array($challengedId, $storedFileId));
+        $hasBook = $stmt->fetch();
+
+        if (!$hasBook) {
+            $stmt = $db->prepare('SELECT id FROM book_shares WHERE stored_file_id = ? AND to_user_id = ? AND status = ?');
+            $stmt->execute(array($storedFileId, $challengedId, 'accepted'));
+            $hasShare = $stmt->fetch();
+
+            if (!$hasShare) {
+                http_response_code(422);
+                echo json_encode(array('error' => 'El usuario desafiado no tiene acceso a este libro'));
+                return;
+            }
+        }
+
+        // Calcular deadline
+        $deadline = null;
+        if ($targetDays !== null) {
+            $deadline = date('Y-m-d H:i:s', strtotime('+' . $targetDays . ' days'));
+        }
+
+        // Insertar desafío
+        $stmt = $db->prepare('
+            INSERT INTO reading_challenges (stored_file_id, challenger_id, challenged_id, challenge_type, target_chapters, target_days, deadline)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ');
+        $stmt->execute(array($storedFileId, $userId, $challengedId, $challengeType, $targetChapters, $targetDays, $deadline));
+
+        // Actualizar social_stats
+        $db->prepare('INSERT OR IGNORE INTO social_stats (user_id) VALUES (?)')->execute(array($userId));
+        $db->prepare('UPDATE social_stats SET challenges_created = challenges_created + 1 WHERE user_id = ?')->execute(array($userId));
+
+        http_response_code(201);
+        echo json_encode(array('ok' => true, 'challenge_id' => (int)$db->lastInsertId()));
+    }
+
+    // GET /api/challenges
+    public function listChallenges($params)
+    {
+        $userId = $params['user_id'];
+        $db = Database::get();
+
+        // Auto-expirar desafíos vencidos
+        $stmt = $db->prepare('UPDATE reading_challenges SET status = ? WHERE status = ? AND deadline IS NOT NULL AND deadline < datetime(\'now\')');
+        $stmt->execute(array('expired', 'active'));
+
+        // Obtener desafíos del usuario
+        $stmt = $db->prepare('
+            SELECT rc.*,
+                   u1.username as challenger_username, u1.avatar as challenger_avatar,
+                   u2.username as challenged_username, u2.avatar as challenged_avatar
+            FROM reading_challenges rc
+            JOIN users u1 ON u1.id = rc.challenger_id
+            JOIN users u2 ON u2.id = rc.challenged_id
+            WHERE rc.challenger_id = ? OR rc.challenged_id = ?
+            ORDER BY rc.created_at DESC
+        ');
+        $stmt->execute(array($userId, $userId));
+        $challenges = $stmt->fetchAll();
+
+        foreach ($challenges as &$c) {
+            $c['id'] = (int)$c['id'];
+            $c['stored_file_id'] = (int)$c['stored_file_id'];
+            $c['challenger_id'] = (int)$c['challenger_id'];
+            $c['challenged_id'] = (int)$c['challenged_id'];
+            $c['target_chapters'] = $c['target_chapters'] !== null ? (int)$c['target_chapters'] : null;
+            $c['target_days'] = $c['target_days'] !== null ? (int)$c['target_days'] : null;
+            $c['xp_reward'] = (int)$c['xp_reward'];
+            $c['winner_user_id'] = $c['winner_user_id'] !== null ? (int)$c['winner_user_id'] : null;
+        }
+        unset($c);
+
+        echo json_encode($challenges);
+    }
+
+    // GET /api/challenges/pending/count
+    public function pendingChallengesCount($params)
+    {
+        $userId = $params['user_id'];
+        $db = Database::get();
+
+        $stmt = $db->prepare('SELECT COUNT(*) FROM reading_challenges WHERE challenged_id = ? AND status = ?');
+        $stmt->execute(array($userId, 'pending'));
+        $count = (int)$stmt->fetchColumn();
+
+        echo json_encode(array('count' => $count));
+    }
+
+    // POST /api/challenges/{id}/accept
+    public function acceptChallenge($params)
+    {
+        $challengeId = $params['id'];
+        $userId = $params['user_id'];
+        $db = Database::get();
+
+        // Verificar que el desafío existe y es para este usuario
+        $stmt = $db->prepare('SELECT * FROM reading_challenges WHERE id = ? AND challenged_id = ? AND status = ?');
+        $stmt->execute(array($challengeId, $userId, 'pending'));
+        $challenge = $stmt->fetch();
+
+        if (!$challenge) {
+            http_response_code(404);
+            echo json_encode(array('error' => 'Desafío no encontrado'));
+            return;
+        }
+
+        // Calcular deadline si tiene target_days
+        $targetDays = $challenge['target_days'] !== null ? (int)$challenge['target_days'] : null;
+        $deadline = null;
+
+        if ($targetDays !== null) {
+            $deadline = date('Y-m-d H:i:s', strtotime('+' . $targetDays . ' days'));
+        }
+
+        // Actualizar a activo
+        $stmt = $db->prepare('UPDATE reading_challenges SET status = ?, started_at = datetime(\'now\'), deadline = ? WHERE id = ?');
+        $stmt->execute(array('active', $deadline, $challengeId));
+
+        echo json_encode(array('ok' => true));
+    }
+
+    // POST /api/challenges/{id}/reject
+    public function rejectChallenge($params)
+    {
+        $challengeId = $params['id'];
+        $userId = $params['user_id'];
+        $db = Database::get();
+
+        // Verificar que el desafío existe y es para este usuario
+        $stmt = $db->prepare('SELECT id FROM reading_challenges WHERE id = ? AND challenged_id = ? AND status = ?');
+        $stmt->execute(array($challengeId, $userId, 'pending'));
+        if (!$stmt->fetch()) {
+            http_response_code(404);
+            echo json_encode(array('error' => 'Desafío no encontrado'));
+            return;
+        }
+
+        // Rechazar
+        $stmt = $db->prepare('UPDATE reading_challenges SET status = ? WHERE id = ?');
+        $stmt->execute(array('rejected', $challengeId));
+
+        echo json_encode(array('ok' => true));
+    }
+
+    // GET /api/challenges/{id}/status
+    public function challengeStatus($params)
+    {
+        $challengeId = $params['id'];
+        $userId = $params['user_id'];
+        $db = Database::get();
+
+        // Obtener el desafío
+        $stmt = $db->prepare('SELECT * FROM reading_challenges WHERE id = ?');
+        $stmt->execute(array($challengeId));
+        $challenge = $stmt->fetch();
+
+        if (!$challenge) {
+            http_response_code(404);
+            echo json_encode(array('error' => 'Desafío no encontrado'));
+            return;
+        }
+
+        $challengerId = (int)$challenge['challenger_id'];
+        $challengedId = (int)$challenge['challenged_id'];
+
+        // Verificar que el usuario es participante
+        if ((int)$userId !== $challengerId && (int)$userId !== $challengedId) {
+            http_response_code(403);
+            echo json_encode(array('error' => 'No eres participante de este desafío'));
+            return;
+        }
+
+        $storedFileId = (int)$challenge['stored_file_id'];
+        $challengeType = $challenge['challenge_type'];
+        $targetChapters = $challenge['target_chapters'] !== null ? (int)$challenge['target_chapters'] : null;
+        $status = $challenge['status'];
+
+        // Obtener progreso de ambos usuarios
+        $challengerProgress = $this->getChallengeUserProgress($db, $challengerId, $storedFileId);
+        $challengedProgress = $this->getChallengeUserProgress($db, $challengedId, $storedFileId);
+
+        // Auto-check completion (solo si está active)
+        if ($status === 'active') {
+            $winnerId = null;
+
+            if ($challengeType === 'chapters_in_days' && $targetChapters !== null) {
+                if ($challengerProgress['current_chapter'] >= $targetChapters) {
+                    $winnerId = $challengerId;
+                } elseif ($challengedProgress['current_chapter'] >= $targetChapters) {
+                    $winnerId = $challengedId;
+                }
+            } elseif ($challengeType === 'finish_before') {
+                if ($challengerProgress['progress_percent'] >= 100) {
+                    $winnerId = $challengerId;
+                } elseif ($challengedProgress['progress_percent'] >= 100) {
+                    $winnerId = $challengedId;
+                }
+            }
+
+            // Si hay ganador, marcar como completado
+            if ($winnerId !== null) {
+                $xpReward = (int)$challenge['xp_reward'];
+                $stmt = $db->prepare('UPDATE reading_challenges SET status = ?, winner_user_id = ?, completed_at = datetime(\'now\') WHERE id = ?');
+                $stmt->execute(array('completed', $winnerId, $challengeId));
+
+                // Dar XP
+                $db->prepare('UPDATE users SET xp = xp + ? WHERE id = ?')->execute(array($xpReward, $winnerId));
+
+                // Actualizar social_stats
+                $db->prepare('INSERT OR IGNORE INTO social_stats (user_id) VALUES (?)')->execute(array($winnerId));
+                $db->prepare('UPDATE social_stats SET challenges_completed = challenges_completed + 1 WHERE user_id = ?')->execute(array($winnerId));
+
+                $challenge['status'] = 'completed';
+                $challenge['winner_user_id'] = $winnerId;
+            }
+
+            // Verificar expiración
+            if ($challenge['deadline'] !== null && $challenge['deadline'] < date('Y-m-d H:i:s')) {
+                $stmt = $db->prepare('UPDATE reading_challenges SET status = ? WHERE id = ?');
+                $stmt->execute(array('expired', $challengeId));
+                $challenge['status'] = 'expired';
+            }
+        }
+
+        echo json_encode(array(
+            'challenge' => array(
+                'id' => (int)$challenge['id'],
+                'stored_file_id' => $storedFileId,
+                'challenger_id' => $challengerId,
+                'challenged_id' => $challengedId,
+                'challenge_type' => $challengeType,
+                'target_chapters' => $targetChapters,
+                'target_days' => $challenge['target_days'] !== null ? (int)$challenge['target_days'] : null,
+                'deadline' => $challenge['deadline'],
+                'status' => $challenge['status'],
+                'xp_reward' => (int)$challenge['xp_reward'],
+                'winner_user_id' => $challenge['winner_user_id'] !== null ? (int)$challenge['winner_user_id'] : null,
+                'created_at' => $challenge['created_at'],
+                'started_at' => $challenge['started_at'],
+                'completed_at' => $challenge['completed_at']
+            ),
+            'challenger_progress' => $challengerProgress,
+            'challenged_progress' => $challengedProgress
+        ));
+    }
+
+    // Helper function para obtener progreso de usuario en desafío
+    private function getChallengeUserProgress($db, $userId, $storedFileId)
+    {
+        $progress = array(
+            'user_id' => (int)$userId,
+            'progress_percent' => 0,
+            'current_chapter' => 0,
+            'current_page' => 0,
+            'last_read' => null
+        );
+
+        // Buscar book_id del usuario para este stored_file_id
+        $stmt = $db->prepare('SELECT id FROM books WHERE user_id = ? AND stored_file_id = ?');
+        $stmt->execute(array($userId, $storedFileId));
+        $book = $stmt->fetch();
+
+        if ($book) {
+            $bookId = (int)$book['id'];
+            $stmt = $db->prepare('SELECT progress_percent, current_chapter, current_page, last_read FROM reading_progress WHERE book_id = ? AND user_id = ?');
+            $stmt->execute(array($bookId, $userId));
+            $rp = $stmt->fetch();
+
+            if ($rp) {
+                $progress['progress_percent'] = (int)$rp['progress_percent'];
+                $progress['current_chapter'] = (int)$rp['current_chapter'];
+                $progress['current_page'] = (int)$rp['current_page'];
+                $progress['last_read'] = $rp['last_read'];
+            }
+        }
+
+        return $progress;
+    }
 }

@@ -14,6 +14,7 @@ import { useLibraryStore } from '@/stores/libraryStore';
 import { useGamificationStore } from '@/stores/gamificationStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useSharesStore } from '@/stores/sharesStore';
+import { useSocialStore } from '@/stores/socialStore';
 import { useAuth } from '@/hooks/useAuth';
 import { useShares } from '@/hooks/useShares';
 import { getUserTitle, getBadgeImageUrl, RARITY_CONFIG } from '@/lib/gamification';
@@ -33,11 +34,13 @@ export function Sidebar({ onClose }: SidebarProps) {
   const storageConfigured = useSettingsStore(s => s.storageConfigured());
   const { setSettingsTab } = useSettingsStore();
   const pendingSharesCount = useSharesStore(s => s.pendingSharesCount);
+  const pendingChallengesCount = useSocialStore(s => s.pendingChallengesCount);
+  const socialStats = useGamificationStore(s => s.socialStats);
   const { handleLogout, loadProfile } = useAuth();
   const { loadPendingShares } = useShares();
 
   const booksForBadges = books.map(b => ({ progress: b.progress }));
-  const userTitle = getUserTitle(stats, booksForBadges, selectedTitleId);
+  const userTitle = getUserTitle(stats, booksForBadges, selectedTitleId, socialStats ?? undefined);
 
   const navigate = (tab: string) => {
     setActiveTab(tab);
@@ -56,7 +59,7 @@ export function Sidebar({ onClose }: SidebarProps) {
         <Button variant={activeTab === "library" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => navigate("library")}><Library className="w-5 h-5 text-primary" /> Biblioteca</Button>
         <Button variant={activeTab === "cloud" ? "secondary" : "ghost"} className="w-full justify-start gap-3 relative" onClick={() => { navigate("cloud"); if (pendingSharesCount > 0) loadPendingShares(); }}>
           <Cloud className="w-5 h-5 text-blue-400" /> Nube
-          {pendingSharesCount > 0 && <span className="absolute right-2 top-1/2 -translate-y-1/2 bg-red-500 text-white text-[9px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">{pendingSharesCount}</span>}
+          {(pendingSharesCount + pendingChallengesCount) > 0 && <span className="absolute right-2 top-1/2 -translate-y-1/2 bg-red-500 text-white text-[9px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">{pendingSharesCount + pendingChallengesCount}</span>}
         </Button>
         <Button variant={activeTab === "gamification" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => navigate("gamification")}><Trophy className="w-5 h-5 text-yellow-500" /> Mi Progreso</Button>
         <Button variant={activeTab === "settings" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => navigate("settings")}><Settings2 className="w-5 h-5 text-zinc-400" /> Configuración</Button>

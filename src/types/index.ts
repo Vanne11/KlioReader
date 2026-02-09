@@ -1,5 +1,5 @@
-export type { AuthUser, CloudBook, SearchUser, BookShare, SharedUserProgress, UserProfile, Note, Bookmark, CheckHashResponse, UploadResponse } from '@/lib/api';
-export type { UserStats, BadgeCategory, BadgeRarity, BadgeWithStatus, BadgeDefinition, BookForBadge } from '@/lib/gamification';
+export type { AuthUser, CloudBook, SearchUser, BookShare, SharedUserProgress, UserProfile, Note, Bookmark, CheckHashResponse, UploadResponse, ReadingRace, RaceLeaderboardEntry, RaceLeaderboardResponse, ReadingChallenge, ChallengeType, ChallengeStatus, ChallengeStatusResponse, SharedNote, SocialStats } from '@/lib/api';
+export type { UserStats, BadgeCategory, BadgeRarity, BadgeWithStatus, BadgeDefinition, BookForBadge, SocialStatsForBadge } from '@/lib/gamification';
 
 export interface BookMetadata {
   title: string;

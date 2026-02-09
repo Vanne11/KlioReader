@@ -1,6 +1,8 @@
+import { useState, useEffect } from 'react';
 import {
   BookOpen, Cloud, CloudUpload, CloudDownload, LogIn, Loader2, Server, Trash2, Pencil,
   User, AlertTriangle, Check, X, Share2, Bell, Send, Search, Users, ChevronDown, ChevronUp,
+  Trophy, Swords, Flag,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -13,9 +15,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { useAuthStore } from '@/stores/authStore';
 import { useCloudStore } from '@/stores/cloudStore';
 import { useSharesStore } from '@/stores/sharesStore';
+import { useSocialStore } from '@/stores/socialStore';
 import { useAuth } from '@/hooks/useAuth';
 import { useCloudBooks } from '@/hooks/useCloudBooks';
 import { useShares } from '@/hooks/useShares';
+import { useRaces } from '@/hooks/useRaces';
+import { useChallenges } from '@/hooks/useChallenges';
+import { RaceLeaderboard } from '@/components/social/RaceLeaderboard';
+import { ChallengeCard } from '@/components/social/ChallengeCard';
 import { coverSrc, formatBytes } from '@/lib/utils';
 import * as api from '@/lib/api';
 
@@ -30,9 +37,25 @@ export function CloudView() {
     shareSending, sharedProgressMap, expandedShareProgress,
   } = useSharesStore();
 
+  const { challenges, pendingChallengesCount: pendingChallenges, currentLeaderboard, challengeTab, setChallengeTab } = useSocialStore();
+
   const { handleAuth, saveProfile, handleDeleteAccount } = useAuth();
   const { loadCloudBooks, downloadBookFromCloud, deleteCloudBook, startEditCloudBook, saveCloudBookEdit } = useCloudBooks();
-  const { handleAcceptShare, handleRejectShare, handleShareSearch, handleSendShare, openShareDialog, toggleShareProgress } = useShares();
+  const { loadPendingShares, handleAcceptShare, handleRejectShare, handleShareSearch, handleSendShare, openShareDialog, toggleShareProgress } = useShares();
+  const { createRace, loadLeaderboard } = useRaces();
+  const { loadChallenges, handleAcceptChallenge, handleRejectChallenge, createChallenge, checkChallengeStatus } = useChallenges();
+
+  const [showChallengeDialog, setShowChallengeDialog] = useState<api.CloudBook | null>(null);
+  const [challengeForm, setChallengeForm] = useState({ challenged_id: 0, challenge_type: 'finish_before' as api.ChallengeType, target_days: 7, target_chapters: 5 });
+
+  // Auto-refresh al entrar a la pestaña Nube
+  useEffect(() => {
+    if (authUser) {
+      loadCloudBooks();
+      loadPendingShares();
+      loadChallenges();
+    }
+  }, []);
 
   return (
     <ScrollArea className="flex-1">
@@ -125,8 +148,8 @@ export function CloudView() {
             ) : (
               <div className="space-y-3">
                 {cloudBooks.map(cb => (
-                  <div key={cb.id}>
-                    <Card className="flex bg-white/5 border-white/5 p-4 gap-4 items-center">
+                  <Card key={cb.id} className="bg-white/5 border-white/5 p-4 space-y-0">
+                    <div className="flex gap-4 items-center">
                       <div className="w-12 aspect-[2/3] rounded bg-[#0f0f14] overflow-hidden shrink-0 border border-white/10 flex items-center justify-center">
                         {cb.cover_base64 ? <img src={coverSrc(cb.cover_base64)} className="w-full h-full object-contain" alt="" /> : <BookOpen className="w-4 h-4 opacity-10" />}
                       </div>
@@ -138,12 +161,23 @@ export function CloudView() {
                           <span className="text-[9px] font-bold text-blue-400">{cb.progress_percent}%</span>
                           <Badge variant="outline" className="text-[8px] h-4 opacity-50">{cb.file_type}</Badge>
                           {cb.is_duplicate && <Badge variant="outline" className="text-[8px] h-4 text-amber-400 border-amber-400/40">Duplicado</Badge>}
-                          {cb.share_count > 0 && <Badge variant="outline" className="text-[8px] h-4 text-cyan-400 border-cyan-400/40"><Users className="w-2.5 h-2.5 mr-0.5" /> Compartido</Badge>}
+                          {cb.share_count > 0 && (
+                            <button className="inline-flex items-center gap-1 text-[8px] h-4 px-1.5 rounded-full border border-cyan-400/40 text-cyan-400 hover:bg-cyan-400/10 transition-colors" onClick={() => toggleShareProgress(cb.id)}>
+                              <Users className="w-2.5 h-2.5" /> Compartido
+                              {expandedShareProgress === cb.id ? <ChevronUp className="w-2.5 h-2.5" /> : <ChevronDown className="w-2.5 h-2.5" />}
+                            </button>
+                          )}
                         </div>
                       </div>
                       <div className="flex gap-0.5 md:gap-1 shrink-0">
                         <Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" className="h-7 w-7 md:h-8 md:w-8 hover:bg-primary/20 hover:text-primary" onClick={() => startEditCloudBook(cb)}><Pencil className="w-3.5 h-3.5 md:w-4 md:h-4" /></Button></TooltipTrigger><TooltipContent>Editar</TooltipContent></Tooltip>
                         <Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" className="h-7 w-7 md:h-8 md:w-8 hover:bg-cyan-600/20 hover:text-cyan-400" onClick={() => openShareDialog(cb)}><Share2 className="w-3.5 h-3.5 md:w-4 md:h-4" /></Button></TooltipTrigger><TooltipContent>Compartir</TooltipContent></Tooltip>
+                        {cb.share_count > 0 && (
+                          <>
+                            <Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" className="h-7 w-7 md:h-8 md:w-8 hover:bg-yellow-600/20 hover:text-yellow-400" onClick={async () => { const raceId = await createRace(cb.id); if (raceId) { loadLeaderboard(raceId); } }}><Flag className="w-3.5 h-3.5 md:w-4 md:h-4" /></Button></TooltipTrigger><TooltipContent>Iniciar Carrera</TooltipContent></Tooltip>
+                            <Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" className="h-7 w-7 md:h-8 md:w-8 hover:bg-purple-600/20 hover:text-purple-400" onClick={() => setShowChallengeDialog(cb)}><Swords className="w-3.5 h-3.5 md:w-4 md:h-4" /></Button></TooltipTrigger><TooltipContent>Retar</TooltipContent></Tooltip>
+                          </>
+                        )}
                         <Tooltip><TooltipTrigger asChild>
                           <Button size="icon" variant="ghost" className="h-7 w-7 md:h-8 md:w-8 hover:bg-green-600/20 hover:text-green-400" disabled={downloadingBookId === cb.id} onClick={() => downloadBookFromCloud(cb)}>
                             {downloadingBookId === cb.id ? <Loader2 className="w-3.5 h-3.5 md:w-4 md:h-4 animate-spin" /> : <CloudDownload className="w-3.5 h-3.5 md:w-4 md:h-4" />}
@@ -151,41 +185,148 @@ export function CloudView() {
                         </TooltipTrigger><TooltipContent>Descargar a local</TooltipContent></Tooltip>
                         <Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" className="h-7 w-7 md:h-8 md:w-8 hover:bg-red-600/20 hover:text-red-400" onClick={() => deleteCloudBook(cb.id)}><Trash2 className="w-3.5 h-3.5 md:w-4 md:h-4" /></Button></TooltipTrigger><TooltipContent>Eliminar de la nube</TooltipContent></Tooltip>
                       </div>
-                    </Card>
-                    {cb.share_count > 0 && (
-                      <div className="ml-16 mt-1">
-                        <button className="text-[10px] text-cyan-400/70 hover:text-cyan-400 flex items-center gap-1" onClick={() => toggleShareProgress(cb.id)}>
-                          <Users className="w-3 h-3" />
-                          {expandedShareProgress === cb.id ? 'Ocultar progreso' : 'Ver progreso compartido'}
-                          {expandedShareProgress === cb.id ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                        </button>
-                        {expandedShareProgress === cb.id && sharedProgressMap[cb.id] && (
-                          <div className="mt-2 space-y-2">
-                            {sharedProgressMap[cb.id].length === 0 ? (
-                              <p className="text-[10px] opacity-30">Sin datos de progreso compartido</p>
-                            ) : sharedProgressMap[cb.id].map(sp => (
-                              <div key={sp.user_id} className="flex items-center gap-3 bg-white/5 rounded-lg px-3 py-2">
-                                <div className="w-6 h-6 rounded-full bg-cyan-400/20 flex items-center justify-center shrink-0"><User className="w-3 h-3 text-cyan-400" /></div>
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-[10px] font-bold truncate">{sp.username}</p>
-                                  <div className="flex items-center gap-2 mt-0.5">
-                                    <Progress value={sp.progress_percent} className="h-1 flex-1 max-w-[80px] bg-white/5" indicatorClassName="bg-cyan-400" />
-                                    <span className="text-[9px] font-bold text-cyan-400">{sp.progress_percent}%</span>
-                                  </div>
+                    </div>
+                    {expandedShareProgress === cb.id && sharedProgressMap[cb.id] && (
+                      <div className="mt-3 pt-3 border-t border-white/5 space-y-1">
+                        <p className="text-[10px] font-bold uppercase tracking-widest opacity-30 mb-2 flex items-center gap-1"><Flag className="w-3 h-3" /> Carrera de lectura</p>
+                        {sharedProgressMap[cb.id].length === 0 ? (
+                          <p className="text-[10px] opacity-30 text-center py-2">Sin datos de progreso compartido</p>
+                        ) : (() => {
+                          const me = { user_id: -1, username: 'Yo', avatar: null, progress_percent: cb.progress_percent, current_chapter: 0, current_page: 0, last_read: null };
+                          const allRunners = [me, ...sharedProgressMap[cb.id]].sort((a, b) => b.progress_percent - a.progress_percent);
+                          return allRunners.map((sp, idx) => {
+                            const isMe = sp.user_id === -1;
+                            const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : null;
+                            const barColor = isMe ? 'bg-primary' : 'bg-cyan-400';
+                            const textColor = isMe ? 'text-primary' : 'text-cyan-400';
+                            const bgColor = isMe ? 'bg-primary/10 border-primary/20' : 'bg-white/[0.02] border-transparent';
+                            return (
+                              <div key={sp.user_id} className={`flex items-center gap-2 rounded-lg px-2.5 py-1.5 border ${bgColor} transition-all`}>
+                                <span className="text-xs w-5 text-center shrink-0">{medal ?? `${idx + 1}`}</span>
+                                <div className={`w-5 h-5 rounded-full ${isMe ? 'bg-primary/20' : 'bg-cyan-400/20'} flex items-center justify-center shrink-0`}>
+                                  <User className={`w-2.5 h-2.5 ${textColor}`} />
                                 </div>
-                                {sp.last_read && <span className="text-[9px] opacity-30 shrink-0">{new Date(sp.last_read).toLocaleDateString()}</span>}
+                                <span className={`text-[10px] font-bold w-16 truncate shrink-0 ${isMe ? 'text-primary' : ''}`}>{sp.username}</span>
+                                <div className="flex-1 h-2.5 bg-white/5 rounded-full overflow-hidden relative">
+                                  <div className={`h-full rounded-full transition-all duration-700 ${barColor}`} style={{ width: `${sp.progress_percent}%` }} />
+                                </div>
+                                <span className={`text-[10px] font-bold w-9 text-right shrink-0 ${textColor}`}>{sp.progress_percent}%</span>
                               </div>
-                            ))}
-                          </div>
-                        )}
+                            );
+                          });
+                        })()}
                       </div>
                     )}
-                  </div>
+                  </Card>
                 ))}
               </div>
             )}
           </div>
         )}
+
+        {/* Challenges Section */}
+        {authUser && challenges.length > 0 && (
+          <>
+            <Separator className="opacity-10" />
+            <div className="space-y-3">
+              <h2 className="text-lg font-bold flex items-center gap-2"><Swords className="w-5 h-5 text-purple-400" /> Retos</h2>
+              <div className="flex bg-white/5 rounded-lg p-1 gap-1">
+                {(['pending', 'active', 'history'] as const).map(tab => (
+                  <Button key={tab} variant={challengeTab === tab ? 'secondary' : 'ghost'} className="flex-1 text-xs h-7" onClick={() => setChallengeTab(tab)}>
+                    {tab === 'pending' ? 'Pendientes' : tab === 'active' ? 'Activos' : 'Historial'}
+                    {tab === 'pending' && pendingChallenges > 0 && <span className="ml-1 bg-red-500 text-white text-[8px] rounded-full w-4 h-4 flex items-center justify-center">{pendingChallenges}</span>}
+                  </Button>
+                ))}
+              </div>
+              <div className="space-y-2">
+                {challenges.filter(c =>
+                  challengeTab === 'pending' ? c.status === 'pending' :
+                  challengeTab === 'active' ? c.status === 'active' :
+                  ['completed', 'expired', 'rejected', 'failed'].includes(c.status)
+                ).map(c => (
+                  <ChallengeCard
+                    key={c.id}
+                    challenge={c}
+                    currentUserId={authUser.id}
+                    onAccept={handleAcceptChallenge}
+                    onReject={handleRejectChallenge}
+                    onViewStatus={checkChallengeStatus}
+                  />
+                ))}
+                {challenges.filter(c =>
+                  challengeTab === 'pending' ? c.status === 'pending' :
+                  challengeTab === 'active' ? c.status === 'active' :
+                  ['completed', 'expired', 'rejected', 'failed'].includes(c.status)
+                ).length === 0 && (
+                  <p className="text-[10px] opacity-30 text-center py-4">Sin retos {challengeTab === 'pending' ? 'pendientes' : challengeTab === 'active' ? 'activos' : 'en historial'}</p>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Race Leaderboard Dialog */}
+        <Dialog open={!!currentLeaderboard} onOpenChange={(open) => { if (!open) useSocialStore.getState().setCurrentLeaderboard(null); }}>
+          <DialogContent className="sm:max-w-[425px] bg-[#16161e] border-white/10 text-white">
+            <DialogHeader><DialogTitle className="flex items-center gap-2"><Trophy className="w-5 h-5 text-yellow-400" /> Carrera de Lectura</DialogTitle></DialogHeader>
+            {currentLeaderboard && authUser && (
+              <div className="py-4">
+                <RaceLeaderboard data={currentLeaderboard} currentUserId={authUser.id} />
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Create Challenge Dialog */}
+        <Dialog open={!!showChallengeDialog} onOpenChange={(open) => { if (!open) setShowChallengeDialog(null); }}>
+          <DialogContent className="sm:max-w-[425px] bg-[#16161e] border-white/10 text-white">
+            <DialogHeader><DialogTitle className="flex items-center gap-2"><Swords className="w-5 h-5 text-purple-400" /> Crear Reto</DialogTitle></DialogHeader>
+            {showChallengeDialog && (
+              <div className="space-y-4 py-4">
+                <p className="text-xs opacity-50">Reta a alguien que comparta "{showChallengeDialog.title}"</p>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold uppercase opacity-50 tracking-widest">Buscar usuario</label>
+                  <div className="relative">
+                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 opacity-30" />
+                    <input onChange={e => handleShareSearch(e.target.value)} placeholder="Nombre de usuario..." className="w-full bg-white/5 border border-white/10 rounded-lg pl-10 pr-4 py-3 text-sm focus:border-primary outline-none" />
+                  </div>
+                </div>
+                {shareSearchResults.length > 0 && (
+                  <div className="space-y-1 max-h-32 overflow-y-auto">
+                    {shareSearchResults.map(u => (
+                      <button key={u.id} className={`flex items-center gap-2 w-full rounded-lg px-3 py-2 text-left ${challengeForm.challenged_id === u.id ? 'bg-primary/20 border border-primary/30' : 'bg-white/5 hover:bg-white/10'}`} onClick={() => setChallengeForm(f => ({ ...f, challenged_id: u.id }))}>
+                        <User className="w-4 h-4 text-primary" /><span className="text-xs truncate">{u.username}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <label className="text-xs font-bold uppercase opacity-50 tracking-widest">Tipo de reto</label>
+                  <div className="flex gap-2">
+                    <Button variant={challengeForm.challenge_type === 'finish_before' ? 'secondary' : 'ghost'} className="flex-1 text-xs h-8" onClick={() => setChallengeForm(f => ({ ...f, challenge_type: 'finish_before' }))}>Terminar primero</Button>
+                    <Button variant={challengeForm.challenge_type === 'chapters_in_days' ? 'secondary' : 'ghost'} className="flex-1 text-xs h-8" onClick={() => setChallengeForm(f => ({ ...f, challenge_type: 'chapters_in_days' }))}>Capítulos en X días</Button>
+                  </div>
+                </div>
+                <div className="flex gap-3">
+                  <div className="space-y-1 flex-1">
+                    <label className="text-[10px] opacity-40">Días límite</label>
+                    <input type="number" min={1} max={90} value={challengeForm.target_days} onChange={e => setChallengeForm(f => ({ ...f, target_days: Number(e.target.value) }))} className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-primary outline-none" />
+                  </div>
+                  {challengeForm.challenge_type === 'chapters_in_days' && (
+                    <div className="space-y-1 flex-1">
+                      <label className="text-[10px] opacity-40">Capítulos objetivo</label>
+                      <input type="number" min={1} value={challengeForm.target_chapters} onChange={e => setChallengeForm(f => ({ ...f, target_chapters: Number(e.target.value) }))} className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-primary outline-none" />
+                    </div>
+                  )}
+                </div>
+                <Button className="w-full font-bold" disabled={challengeForm.challenged_id === 0} onClick={() => {
+                  createChallenge(showChallengeDialog.id, challengeForm);
+                  setShowChallengeDialog(null);
+                }}>Enviar Reto</Button>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
 
         {/* Edit Cloud Book Dialog */}
         <Dialog open={!!editingCloudBook} onOpenChange={(open) => { if (!open) setEditingCloudBook(null); }}>

@@ -15,6 +15,7 @@ interface ReaderState {
   currentPageInChapter: number;
   totalPagesInChapter: number;
   pageHeight: number;
+  pageWidth: number;
   showNotesPanel: boolean;
 
   setCurrentBook: (book: Book | null) => void;
@@ -30,6 +31,7 @@ interface ReaderState {
   setCurrentPageInChapter: (page: number | ((prev: number) => number)) => void;
   setTotalPagesInChapter: (pages: number) => void;
   setPageHeight: (height: number) => void;
+  setPageWidth: (width: number) => void;
   setShowNotesPanel: (show: boolean | ((prev: boolean) => boolean)) => void;
 }
 
@@ -47,6 +49,7 @@ export const useReaderStore = create<ReaderState>()((set) => ({
   currentPageInChapter: 0,
   totalPagesInChapter: 1,
   pageHeight: 0,
+  pageWidth: 0,
   showNotesPanel: false,
 
   setCurrentBook: (book) => set({ currentBook: book }),
@@ -66,6 +69,7 @@ export const useReaderStore = create<ReaderState>()((set) => ({
   })),
   setTotalPagesInChapter: (pages) => set({ totalPagesInChapter: pages }),
   setPageHeight: (height) => set({ pageHeight: height }),
+  setPageWidth: (width) => set({ pageWidth: width }),
   setShowNotesPanel: (showOrFn) => set((s) => ({
     showNotesPanel: typeof showOrFn === 'function' ? showOrFn(s.showNotesPanel) : showOrFn,
   })),

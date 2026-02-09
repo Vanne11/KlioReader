@@ -19,12 +19,13 @@ export function GamificationView() {
   const badgeFilter = useGamificationStore(s => s.badgeFilter);
   const selectedBadgeDetail = useGamificationStore(s => s.selectedBadgeDetail);
   const { setSelectedTitleId, setBadgeFilter, setSelectedBadgeDetail } = useGamificationStore();
+  const socialStats = useGamificationStore(s => s.socialStats);
   const books = useLibraryStore(s => s.books);
 
   const booksForBadges = books.map(b => ({ progress: b.progress }));
-  const allBadges = getAllBadgesWithStatus(stats, booksForBadges);
+  const allBadges = getAllBadgesWithStatus(stats, booksForBadges, socialStats ?? undefined);
   const unlockedCount = allBadges.filter(b => b.unlocked).length;
-  const userTitle = getUserTitle(stats, booksForBadges, selectedTitleId);
+  const userTitle = getUserTitle(stats, booksForBadges, selectedTitleId, socialStats ?? undefined);
   const nextLevelXp = xpForNextLevel(stats.level);
   const xpProgress = Math.min(100, (stats.xp / nextLevelXp) * 100);
   const filteredBadges = badgeFilter === 'all' ? allBadges : allBadges.filter(b => b.category === badgeFilter);

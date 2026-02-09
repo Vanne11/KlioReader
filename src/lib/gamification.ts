@@ -8,10 +8,19 @@ export interface UserStats {
 // ── Badge System ──
 
 export type BadgeRarity = 'bronze' | 'silver' | 'gold' | 'diamond';
-export type BadgeCategory = 'reading' | 'consistency' | 'collection' | 'level' | 'explorer' | 'elite';
+export type BadgeCategory = 'reading' | 'consistency' | 'collection' | 'level' | 'explorer' | 'social' | 'elite';
 
 export interface BookForBadge {
   progress: number;
+}
+
+export interface SocialStatsForBadge {
+  booksShared: number;
+  racesWon: number;
+  racesParticipated: number;
+  challengesCompleted: number;
+  challengesCreated: number;
+  sharedNotesCount: number;
 }
 
 export interface BadgeDefinition {
@@ -20,7 +29,7 @@ export interface BadgeDefinition {
   description: string;
   category: BadgeCategory;
   rarity: BadgeRarity;
-  condition: (stats: UserStats, books: BookForBadge[]) => boolean;
+  condition: (stats: UserStats, books: BookForBadge[], social?: SocialStatsForBadge) => boolean;
 }
 
 export interface BadgeWithStatus extends BadgeDefinition {
@@ -40,6 +49,7 @@ export const CATEGORY_CONFIG: Record<BadgeCategory, { label: string; emoji: stri
   collection:  { label: 'Colección',   emoji: '📦' },
   level:       { label: 'Nivel y XP',  emoji: '⭐' },
   explorer:    { label: 'Explorador',  emoji: '🧭' },
+  social:      { label: 'Social',      emoji: '🤝' },
   elite:       { label: 'Élite',       emoji: '🏆' },
 };
 
@@ -100,33 +110,45 @@ export const BADGES: BadgeDefinition[] = [
   { id: 'night_owl',  name: 'Búho Nocturno',       description: 'Lee después de las 11 de la noche',                      category: 'explorer', rarity: 'silver',  condition: () => new Date().getHours() >= 23 },
   { id: 'early_bird', name: 'Madrugador',          description: 'Lee antes de las 7 de la mañana',                        category: 'explorer', rarity: 'silver',  condition: () => new Date().getHours() < 7 },
 
+  // ── SOCIAL (10) ──
+  { id: 'first_share',       name: 'Generoso',            description: 'Comparte tu primer libro con alguien',                      category: 'social', rarity: 'bronze',  condition: (_, __, s) => (s?.booksShared ?? 0) >= 1 },
+  { id: 'sharer',            name: 'Compartidor',         description: 'Comparte 5 libros con otros usuarios',                       category: 'social', rarity: 'silver',  condition: (_, __, s) => (s?.booksShared ?? 0) >= 5 },
+  { id: 'librarian_social',  name: 'Bibliotecario Social', description: 'Comparte 15 libros con otros usuarios',                    category: 'social', rarity: 'gold',    condition: (_, __, s) => (s?.booksShared ?? 0) >= 15 },
+  { id: 'first_race',        name: 'Corredor',            description: 'Participa en tu primera carrera de lectura',                 category: 'social', rarity: 'bronze',  condition: (_, __, s) => (s?.racesParticipated ?? 0) >= 1 },
+  { id: 'race_winner',       name: 'Velocista',           description: 'Gana una carrera de lectura',                                category: 'social', rarity: 'silver',  condition: (_, __, s) => (s?.racesWon ?? 0) >= 1 },
+  { id: 'champion',          name: 'Campeón',             description: 'Gana 5 carreras de lectura',                                 category: 'social', rarity: 'gold',    condition: (_, __, s) => (s?.racesWon ?? 0) >= 5 },
+  { id: 'challenger',        name: 'Retador',             description: 'Crea tu primer reto de lectura',                             category: 'social', rarity: 'bronze',  condition: (_, __, s) => (s?.challengesCreated ?? 0) >= 1 },
+  { id: 'challenge_master',  name: 'Maestro de Retos',    description: 'Completa 5 retos de lectura',                                category: 'social', rarity: 'gold',    condition: (_, __, s) => (s?.challengesCompleted ?? 0) >= 5 },
+  { id: 'annotator',         name: 'Anotador Social',     description: 'Comparte 10 notas con otros lectores',                       category: 'social', rarity: 'silver',  condition: (_, __, s) => (s?.sharedNotesCount ?? 0) >= 10 },
+  { id: 'social_butterfly',  name: 'Mariposa Social',     description: 'Comparte 10 libros, participa en 3 carreras y 3 retos',      category: 'social', rarity: 'diamond', condition: (_, __, s) => (s?.booksShared ?? 0) >= 10 && (s?.racesParticipated ?? 0) >= 3 && (s?.challengesCompleted ?? 0) >= 3 },
+
   // ── ÉLITE (4) ──
   { id: 'completionist',  name: 'Completista',     description: 'Completa todos los libros de tu biblioteca (mínimo 5)',   category: 'elite', rarity: 'gold',    condition: (_, b) => b.length >= 5 && b.every(x => x.progress >= 100) },
   { id: 'century',        name: 'Centenario',      description: 'Acumula 100,000 puntos de experiencia',                   category: 'elite', rarity: 'diamond', condition: (s) => s.xp >= 100000 },
   { id: 'diamond_reader', name: 'Lector Diamante', description: 'Nivel 50, 25 libros completados y racha de 30 días',     category: 'elite', rarity: 'diamond', condition: (s, b) => s.level >= 50 && b.filter(x => x.progress >= 100).length >= 25 && s.streak >= 30 },
-  { id: 'klio_master',    name: 'Maestro de Klio', description: 'Desbloquea al menos 40 insignias',                       category: 'elite', rarity: 'diamond', condition: (s, b) => {
+  { id: 'klio_master',    name: 'Maestro de Klio', description: 'Desbloquea al menos 40 insignias',                       category: 'elite', rarity: 'diamond', condition: (s, b, social) => {
     const otherBadges = BADGES.filter(bd => bd.id !== 'klio_master');
-    return otherBadges.filter(bd => bd.condition(s, b)).length >= 40;
+    return otherBadges.filter(bd => bd.condition(s, b, social)).length >= 40;
   }},
 ];
 
 const RARITY_ORDER: BadgeRarity[] = ['diamond', 'gold', 'silver', 'bronze'];
 
 /** Insignias desbloqueadas, ordenadas por rareza (diamante primero) */
-export function getUnlockedBadges(stats: UserStats, books: BookForBadge[]): BadgeDefinition[] {
+export function getUnlockedBadges(stats: UserStats, books: BookForBadge[], social?: SocialStatsForBadge): BadgeDefinition[] {
   return BADGES
-    .filter(b => b.condition(stats, books))
+    .filter(b => b.condition(stats, books, social))
     .sort((a, b) => RARITY_ORDER.indexOf(a.rarity) - RARITY_ORDER.indexOf(b.rarity));
 }
 
 /** Todas las insignias con flag de desbloqueada */
-export function getAllBadgesWithStatus(stats: UserStats, books: BookForBadge[]): BadgeWithStatus[] {
-  return BADGES.map(b => ({ ...b, unlocked: b.condition(stats, books) }));
+export function getAllBadgesWithStatus(stats: UserStats, books: BookForBadge[], social?: SocialStatsForBadge): BadgeWithStatus[] {
+  return BADGES.map(b => ({ ...b, unlocked: b.condition(stats, books, social) }));
 }
 
 /** Insignias agrupadas por categoría */
-export function getBadgesByCategory(stats: UserStats, books: BookForBadge[]): Record<BadgeCategory, BadgeWithStatus[]> {
-  const all = getAllBadgesWithStatus(stats, books);
+export function getBadgesByCategory(stats: UserStats, books: BookForBadge[], social?: SocialStatsForBadge): Record<BadgeCategory, BadgeWithStatus[]> {
+  const all = getAllBadgesWithStatus(stats, books, social);
   const result = {} as Record<BadgeCategory, BadgeWithStatus[]>;
   for (const cat of Object.keys(CATEGORY_CONFIG) as BadgeCategory[]) {
     result[cat] = all.filter(b => b.category === cat);
@@ -135,8 +157,8 @@ export function getBadgesByCategory(stats: UserStats, books: BookForBadge[]): Re
 }
 
 /** Título del usuario: insignia seleccionada manualmente o la de mayor rareza */
-export function getUserTitle(stats: UserStats, books: BookForBadge[], selectedTitleId?: string | null): BadgeDefinition | null {
-  const unlocked = getUnlockedBadges(stats, books);
+export function getUserTitle(stats: UserStats, books: BookForBadge[], selectedTitleId?: string | null, social?: SocialStatsForBadge): BadgeDefinition | null {
+  const unlocked = getUnlockedBadges(stats, books, social);
   if (unlocked.length === 0) return null;
   if (selectedTitleId) {
     const selected = unlocked.find(b => b.id === selectedTitleId);

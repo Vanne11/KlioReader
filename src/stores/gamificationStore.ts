@@ -1,17 +1,19 @@
 import { create } from 'zustand';
 import type { BadgeCategory, BadgeWithStatus } from '@/types';
-import { UserStats, INITIAL_STATS, calculateLevel } from '@/lib/gamification';
+import { UserStats, INITIAL_STATS, calculateLevel, SocialStatsForBadge } from '@/lib/gamification';
 
 interface GamificationState {
   stats: UserStats;
   selectedTitleId: string | null;
   badgeFilter: 'all' | BadgeCategory;
   selectedBadgeDetail: BadgeWithStatus | null;
+  socialStats: SocialStatsForBadge | null;
 
   setStats: (stats: UserStats | ((prev: UserStats) => UserStats)) => void;
   setSelectedTitleId: (id: string | null) => void;
   setBadgeFilter: (filter: 'all' | BadgeCategory) => void;
   setSelectedBadgeDetail: (badge: BadgeWithStatus | null) => void;
+  setSocialStats: (stats: SocialStatsForBadge | null) => void;
 }
 
 function loadStats(): UserStats {
@@ -32,6 +34,7 @@ export const useGamificationStore = create<GamificationState>()((set) => ({
   selectedTitleId: localStorage.getItem('klioSelectedTitle'),
   badgeFilter: 'all',
   selectedBadgeDetail: null,
+  socialStats: null,
 
   setStats: (statsOrFn) => set((s) => ({
     stats: typeof statsOrFn === 'function' ? statsOrFn(s.stats) : statsOrFn,
@@ -39,4 +42,5 @@ export const useGamificationStore = create<GamificationState>()((set) => ({
   setSelectedTitleId: (id) => set({ selectedTitleId: id }),
   setBadgeFilter: (filter) => set({ badgeFilter: filter }),
   setSelectedBadgeDetail: (badge) => set({ selectedBadgeDetail: badge }),
+  setSocialStats: (stats) => set({ socialStats: stats }),
 }));

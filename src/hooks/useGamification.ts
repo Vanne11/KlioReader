@@ -10,6 +10,7 @@ import { getCloudSyncingRef } from './useCloudBooks';
 export function useGamification() {
   const stats = useGamificationStore(s => s.stats);
   const selectedTitleId = useGamificationStore(s => s.selectedTitleId);
+  const socialStats = useGamificationStore(s => s.socialStats);
   const books = useLibraryStore(s => s.books);
   const { showAlert } = useUIStore();
   const initialRenderRef = useRef(true);
@@ -39,7 +40,7 @@ export function useGamification() {
   // Detect new badges
   useEffect(() => {
     const booksForBadges = books.map(b => ({ progress: b.progress }));
-    const currentUnlocked = getUnlockedBadges(stats, booksForBadges).map(b => b.id);
+    const currentUnlocked = getUnlockedBadges(stats, booksForBadges, socialStats ?? undefined).map(b => b.id);
     const savedRaw = localStorage.getItem('klioUnlockedBadges');
     const previousIds: string[] = savedRaw ? JSON.parse(savedRaw) : [];
     const newBadges = currentUnlocked.filter(id => !previousIds.includes(id));
@@ -51,5 +52,5 @@ export function useGamification() {
     if (allKnown.length !== previousIds.length) {
       localStorage.setItem('klioUnlockedBadges', JSON.stringify(allKnown));
     }
-  }, [stats, books]);
+  }, [stats, books, socialStats]);
 }

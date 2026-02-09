@@ -21,7 +21,7 @@ export function useCloudBooks() {
     setEditingCloudBook, editCloudForm, editingCloudBook, setEditCloudForm,
   } = useCloudStore();
   const { libraryPath, setBooks } = useLibraryStore();
-  const { setStats, setSelectedTitleId } = useGamificationStore();
+  const { setStats, setSelectedTitleId, setSocialStats } = useGamificationStore();
   const { showAlert } = useUIStore();
   const { setSettingsTab } = useSettingsStore();
 
@@ -29,19 +29,32 @@ export function useCloudBooks() {
     if (!api.isLoggedIn()) return;
     setCloudLoading(true);
     try {
-      const [cloudBooksList, cloudStats] = await Promise.all([
+      const [cloudBooksList, cloudStats, socialStatsRaw] = await Promise.all([
         api.listBooks(),
         api.getStats().catch(() => null),
+        api.getSocialStats().catch(() => null),
       ]);
       setCloudBooks(cloudBooksList);
       setCloudBooksReady(true);
 
       cloudSyncingRef = true;
+      // Process social stats first so they're available for badge evaluation
+      const socialForBadges = socialStatsRaw ? {
+        booksShared: Number(socialStatsRaw.books_shared) || 0,
+        racesWon: Number(socialStatsRaw.races_won) || 0,
+        racesParticipated: Number(socialStatsRaw.races_participated) || 0,
+        challengesCompleted: Number(socialStatsRaw.challenges_completed) || 0,
+        challengesCreated: Number(socialStatsRaw.challenges_created) || 0,
+        sharedNotesCount: Number(socialStatsRaw.shared_notes_count) || 0,
+      } : undefined;
+      if (socialForBadges) {
+        setSocialStats(socialForBadges);
+      }
       if (cloudStats) {
         const remote = statsFromApi(cloudStats);
         const currentBooks = useLibraryStore.getState().books;
         const booksForBadges = currentBooks.map((b: any) => ({ progress: b.progress }));
-        const remoteBadges = getUnlockedBadges(remote, booksForBadges).map(b => b.id);
+        const remoteBadges = getUnlockedBadges(remote, booksForBadges, socialForBadges).map(b => b.id);
         const savedRaw = localStorage.getItem('klioUnlockedBadges');
         const previousIds: string[] = savedRaw ? JSON.parse(savedRaw) : [];
         const merged = [...new Set([...previousIds, ...remoteBadges])];

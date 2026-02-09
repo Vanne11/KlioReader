@@ -170,6 +170,9 @@ export interface Note {
   content: string;
   highlight_text: string | null;
   color: string;
+  is_shared?: number;
+  audio_path?: string | null;
+  audio_duration?: number | null;
   created_at: string;
 }
 
@@ -416,4 +419,170 @@ export async function rejectShare(shareId: number): Promise<void> {
 
 export async function getSharedProgress(bookId: number): Promise<SharedUserProgress[]> {
   return request<SharedUserProgress[]>(`/api/books/${bookId}/shared-progress`);
+}
+
+// ── Races ──
+
+export interface ReadingRace {
+  id: number;
+  stored_file_id: number;
+  created_by: number;
+  status: "active" | "completed";
+  winner_user_id: number | null;
+}
+
+export interface RaceLeaderboardEntry {
+  user_id: number;
+  username: string;
+  avatar: string | null;
+  joined_at: string;
+  finished_at: string | null;
+  progress_percent: number;
+}
+
+export interface RaceLeaderboardResponse {
+  race: ReadingRace;
+  leaderboard: RaceLeaderboardEntry[];
+}
+
+export async function createRace(bookId: number): Promise<{ ok: boolean; race_id: number }> {
+  return request(`/api/books/${bookId}/races`, { method: "POST" });
+}
+
+export async function joinRace(raceId: number): Promise<void> {
+  await request(`/api/races/${raceId}/join`, { method: "POST" });
+}
+
+export async function getRaceLeaderboard(raceId: number): Promise<RaceLeaderboardResponse> {
+  return request<RaceLeaderboardResponse>(`/api/races/${raceId}/leaderboard`);
+}
+
+export async function finishRace(raceId: number): Promise<{ ok: boolean; is_winner: boolean }> {
+  return request(`/api/races/${raceId}/finish`, { method: "POST" });
+}
+
+// ── Challenges ──
+
+export type ChallengeType = "chapters_in_days" | "finish_before";
+export type ChallengeStatus = "pending" | "active" | "completed" | "failed" | "expired" | "rejected";
+
+export interface ReadingChallenge {
+  id: number;
+  stored_file_id: number;
+  challenger_id: number;
+  challenged_id: number;
+  challenge_type: ChallengeType;
+  target_chapters: number | null;
+  target_days: number | null;
+  deadline: string | null;
+  status: ChallengeStatus;
+  winner_user_id: number | null;
+  xp_reward: number;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  challenger_username?: string;
+  challenger_avatar?: string | null;
+  challenged_username?: string;
+  challenged_avatar?: string | null;
+}
+
+export interface ChallengeStatusResponse {
+  challenge: ReadingChallenge;
+  challenger_progress: SharedUserProgress;
+  challenged_progress: SharedUserProgress;
+}
+
+export async function createChallenge(
+  bookId: number,
+  data: { challenged_id: number; challenge_type: ChallengeType; target_chapters?: number; target_days?: number }
+): Promise<{ ok: boolean; challenge_id: number }> {
+  return request(`/api/books/${bookId}/challenges`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function listChallenges(): Promise<ReadingChallenge[]> {
+  return request<ReadingChallenge[]>("/api/challenges");
+}
+
+export async function getPendingChallengesCount(): Promise<number> {
+  const res = await request<{ count: number }>("/api/challenges/pending/count");
+  return res.count;
+}
+
+export async function acceptChallenge(challengeId: number): Promise<void> {
+  await request(`/api/challenges/${challengeId}/accept`, { method: "POST" });
+}
+
+export async function rejectChallenge(challengeId: number): Promise<void> {
+  await request(`/api/challenges/${challengeId}/reject`, { method: "POST" });
+}
+
+export async function getChallengeStatus(challengeId: number): Promise<ChallengeStatusResponse> {
+  return request<ChallengeStatusResponse>(`/api/challenges/${challengeId}/status`);
+}
+
+// ── Shared Notes ──
+
+export interface SharedNote {
+  id: number;
+  chapter_index: number;
+  content: string;
+  highlight_text: string | null;
+  color: string;
+  user_id: number;
+  username: string;
+  avatar: string | null;
+  has_audio: boolean;
+  audio_duration: number | null;
+  created_at: string;
+}
+
+export async function toggleNoteShared(noteId: number): Promise<{ ok: boolean; is_shared: number }> {
+  return request(`/api/notes/${noteId}/share`, { method: "PUT" });
+}
+
+export async function getSharedNotes(bookId: number): Promise<SharedNote[]> {
+  return request<SharedNote[]>(`/api/books/${bookId}/shared-notes`);
+}
+
+// ── Voice Notes ──
+
+export async function uploadVoiceNote(
+  bookId: number,
+  audio: Blob,
+  data: { chapter_index: number; content?: string; duration: number }
+): Promise<{ id: number; audio_duration: number }> {
+  const form = new FormData();
+  form.append("audio", audio, "voice.webm");
+  form.append("chapter_index", String(data.chapter_index));
+  form.append("duration", String(data.duration));
+  if (data.content) form.append("content", data.content);
+  return request(`/api/books/${bookId}/voice-notes`, { method: "POST", body: form });
+}
+
+export function getVoiceNoteAudioUrl(noteId: number): string {
+  const token = localStorage.getItem("authToken");
+  return `${API_URL}/api/voice-notes/${noteId}/audio${token ? "?token=" + token : ""}`;
+}
+
+export async function deleteVoiceNote(noteId: number): Promise<void> {
+  await request(`/api/voice-notes/${noteId}`, { method: "DELETE" });
+}
+
+// ── Social Stats ──
+
+export interface SocialStats {
+  books_shared: number;
+  races_won: number;
+  races_participated: number;
+  challenges_completed: number;
+  challenges_created: number;
+  shared_notes_count: number;
+}
+
+export async function getSocialStats(): Promise<SocialStats> {
+  return request<SocialStats>("/api/user/social-stats");
 }

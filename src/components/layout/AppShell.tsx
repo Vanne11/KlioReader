@@ -11,13 +11,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   const setSidebarOpen = useUIStore(s => s.setSidebarOpen);
 
   return (
-    <div className="flex h-screen bg-[#0f0f14] text-white font-sans overflow-hidden">
+    <div className="flex h-screen bg-[#0f0f14] text-white font-sans overflow-hidden" style={{ paddingTop: 'var(--sat)', paddingBottom: 'var(--sab)' }}>
       {isMobile ? (
         <>
           <Button
             variant="ghost"
             size="icon"
-            className="fixed top-3 left-3 z-40 h-10 w-10 bg-[#16161e]/80 backdrop-blur-md border border-white/10 shadow-lg"
+            className="fixed left-3 z-40 h-10 w-10 bg-[#16161e]/80 backdrop-blur-md border border-white/10 shadow-lg"
+            style={{ top: 'calc(0.75rem + var(--sat))' }}
             onClick={() => setSidebarOpen(true)}
           >
             <Menu className="w-5 h-5" />
@@ -25,7 +26,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           {sidebarOpen && (
             <>
               <div className="fixed inset-0 bg-black/60 z-40" onClick={() => setSidebarOpen(false)} />
-              <div className="fixed inset-y-0 left-0 z-50 w-64">
+              <div className="fixed inset-y-0 left-0 z-50 w-64" style={{ paddingTop: 'var(--sat)', paddingBottom: 'var(--sab)' }}>
                 <Sidebar onClose={() => setSidebarOpen(false)} />
               </div>
             </>

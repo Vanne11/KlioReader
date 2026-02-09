@@ -166,4 +166,67 @@ class UserController
 
         echo json_encode(array('ok' => true));
     }
+
+    // GET /api/user/social-stats
+    public function socialStats($params)
+    {
+        $userId = $params['user_id'];
+        $db = Database::get();
+
+        // Intentar obtener del cache
+        $stmt = $db->prepare('SELECT * FROM social_stats WHERE user_id = ?');
+        $stmt->execute(array($userId));
+        $cached = $stmt->fetch();
+
+        if ($cached) {
+            echo json_encode(array(
+                'books_shared' => (int)$cached['books_shared'],
+                'races_won' => (int)$cached['races_won'],
+                'races_participated' => (int)$cached['races_participated'],
+                'challenges_completed' => (int)$cached['challenges_completed'],
+                'challenges_created' => (int)$cached['challenges_created'],
+                'shared_notes_count' => (int)$cached['shared_notes_count'],
+            ));
+            return;
+        }
+
+        // Fallback: calcular desde tablas base
+        $stmt = $db->prepare('SELECT COUNT(DISTINCT stored_file_id) FROM book_shares WHERE (from_user_id = ? OR to_user_id = ?) AND status = ?');
+        $stmt->execute(array($userId, $userId, 'accepted'));
+        $booksShared = (int)$stmt->fetchColumn();
+
+        $stmt = $db->prepare('SELECT COUNT(*) FROM reading_races WHERE winner_user_id = ?');
+        $stmt->execute(array($userId));
+        $racesWon = (int)$stmt->fetchColumn();
+
+        $stmt = $db->prepare('SELECT COUNT(*) FROM race_participants WHERE user_id = ?');
+        $stmt->execute(array($userId));
+        $racesParticipated = (int)$stmt->fetchColumn();
+
+        $stmt = $db->prepare('SELECT COUNT(*) FROM reading_challenges WHERE (challenger_id = ? OR challenged_id = ?) AND status = ? AND winner_user_id = ?');
+        $stmt->execute(array($userId, $userId, 'completed', $userId));
+        $challengesCompleted = (int)$stmt->fetchColumn();
+
+        $stmt = $db->prepare('SELECT COUNT(*) FROM reading_challenges WHERE challenger_id = ?');
+        $stmt->execute(array($userId));
+        $challengesCreated = (int)$stmt->fetchColumn();
+
+        $stmt = $db->prepare('SELECT COUNT(*) FROM notes WHERE user_id = ? AND is_shared = 1');
+        $stmt->execute(array($userId));
+        $sharedNotes = (int)$stmt->fetchColumn();
+
+        // Guardar en cache
+        $db->prepare('INSERT OR REPLACE INTO social_stats (user_id, books_shared, races_won, races_participated, challenges_completed, challenges_created, shared_notes_count) VALUES (?, ?, ?, ?, ?, ?, ?)')->execute(array(
+            $userId, $booksShared, $racesWon, $racesParticipated, $challengesCompleted, $challengesCreated, $sharedNotes
+        ));
+
+        echo json_encode(array(
+            'books_shared' => $booksShared,
+            'races_won' => $racesWon,
+            'races_participated' => $racesParticipated,
+            'challenges_completed' => $challengesCompleted,
+            'challenges_created' => $challengesCreated,
+            'shared_notes_count' => $sharedNotes,
+        ));
+    }
 }

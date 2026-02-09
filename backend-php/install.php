@@ -153,6 +153,28 @@ if (empty($errors)) {
             }
             $checks[] = array('Migración 007 (suscriptor)', 'Aplicada', true);
         }
+
+        // Migración 008: Social Gamification (carreras, retos, notas compartidas)
+        $migration008 = __DIR__ . '/migrations/008_social_gamification.sql';
+        if (file_exists($migration008)) {
+            // Agregar columnas a notes si no existen
+            $noteCols = $pdo->query('PRAGMA table_info(notes)')->fetchAll(PDO::FETCH_ASSOC);
+            $noteColNames = array();
+            foreach ($noteCols as $col) {
+                $noteColNames[] = $col['name'];
+            }
+            if (!in_array('is_shared', $noteColNames)) {
+                $pdo->exec('ALTER TABLE notes ADD COLUMN is_shared INTEGER DEFAULT 0');
+            }
+            if (!in_array('audio_path', $noteColNames)) {
+                $pdo->exec('ALTER TABLE notes ADD COLUMN audio_path TEXT DEFAULT NULL');
+            }
+            if (!in_array('audio_duration', $noteColNames)) {
+                $pdo->exec('ALTER TABLE notes ADD COLUMN audio_duration INTEGER DEFAULT NULL');
+            }
+            $pdo->exec(file_get_contents($migration008));
+            $checks[] = array('Migración 008 (social)', 'Aplicada', true);
+        }
     } catch (Exception $e) {
         $errors[] = 'Error al crear la base de datos: ' . $e->getMessage();
         $checks[] = array('Base de datos SQLite', 'Error: ' . $e->getMessage(), false);
