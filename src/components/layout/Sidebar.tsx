@@ -1,6 +1,6 @@
 import {
   BookOpen, Trophy, Library, Cloud, Settings2,
-  LogIn, LogOut, User, Crown,
+  LogIn, LogOut, User, Crown, X,
   RefreshCw, WifiOff, Check, HardDrive,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -18,7 +18,11 @@ import { useAuth } from '@/hooks/useAuth';
 import { useShares } from '@/hooks/useShares';
 import { getUserTitle, getBadgeImageUrl, RARITY_CONFIG } from '@/lib/gamification';
 
-export function Sidebar() {
+interface SidebarProps {
+  onClose?: () => void;
+}
+
+export function Sidebar({ onClose }: SidebarProps) {
   const { activeTab, setActiveTab } = useUIStore();
   const authUser = useAuthStore(s => s.authUser);
   const profile = useAuthStore(s => s.profile);
@@ -35,17 +39,27 @@ export function Sidebar() {
   const booksForBadges = books.map(b => ({ progress: b.progress }));
   const userTitle = getUserTitle(stats, booksForBadges, selectedTitleId);
 
+  const navigate = (tab: string) => {
+    setActiveTab(tab);
+    onClose?.();
+  };
+
   return (
-    <aside className="w-64 border-r border-white/5 bg-[#16161e] flex flex-col">
-      <div className="p-6"><h1 className="text-2xl font-bold text-primary flex items-center gap-2 italic"><BookOpen className="w-7 h-7" /> KlioReader</h1></div>
+    <aside className="w-64 border-r border-white/5 bg-[#16161e] flex flex-col h-full">
+      <div className="p-6 flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-primary flex items-center gap-2 italic"><BookOpen className="w-7 h-7" /> KlioReader</h1>
+        {onClose && (
+          <Button variant="ghost" size="icon" className="h-8 w-8 md:hidden" onClick={onClose}><X className="w-5 h-5" /></Button>
+        )}
+      </div>
       <nav className="flex-1 px-4 space-y-1">
-        <Button variant={activeTab === "library" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => setActiveTab("library")}><Library className="w-5 h-5 text-primary" /> Biblioteca</Button>
-        <Button variant={activeTab === "cloud" ? "secondary" : "ghost"} className="w-full justify-start gap-3 relative" onClick={() => { setActiveTab("cloud"); if (pendingSharesCount > 0) loadPendingShares(); }}>
+        <Button variant={activeTab === "library" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => navigate("library")}><Library className="w-5 h-5 text-primary" /> Biblioteca</Button>
+        <Button variant={activeTab === "cloud" ? "secondary" : "ghost"} className="w-full justify-start gap-3 relative" onClick={() => { navigate("cloud"); if (pendingSharesCount > 0) loadPendingShares(); }}>
           <Cloud className="w-5 h-5 text-blue-400" /> Nube
           {pendingSharesCount > 0 && <span className="absolute right-2 top-1/2 -translate-y-1/2 bg-red-500 text-white text-[9px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">{pendingSharesCount}</span>}
         </Button>
-        <Button variant={activeTab === "gamification" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => setActiveTab("gamification")}><Trophy className="w-5 h-5 text-yellow-500" /> Mi Progreso</Button>
-        <Button variant={activeTab === "settings" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => setActiveTab("settings")}><Settings2 className="w-5 h-5 text-zinc-400" /> Configuración</Button>
+        <Button variant={activeTab === "gamification" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => navigate("gamification")}><Trophy className="w-5 h-5 text-yellow-500" /> Mi Progreso</Button>
+        <Button variant={activeTab === "settings" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => navigate("settings")}><Settings2 className="w-5 h-5 text-zinc-400" /> Configuración</Button>
       </nav>
       <div className="p-6 mt-auto border-t border-white/5">
         {authUser ? (
@@ -60,7 +74,7 @@ export function Sidebar() {
             <Button variant="ghost" size="sm" className="w-full justify-start text-xs opacity-50" onClick={handleLogout}><LogOut className="w-3 h-3 mr-2" /> Cerrar Sesión</Button>
           </div>
         ) : (
-          <Button variant="outline" size="sm" className="w-full text-xs border-white/10" onClick={() => setActiveTab('cloud')}><LogIn className="w-3 h-3 mr-2" /> Iniciar Sesión</Button>
+          <Button variant="outline" size="sm" className="w-full text-xs border-white/10" onClick={() => navigate('cloud')}><LogIn className="w-3 h-3 mr-2" /> Iniciar Sesión</Button>
         )}
         {storageConfigured && (
           <div className="my-2">
@@ -76,7 +90,7 @@ export function Sidebar() {
                       ? 'text-green-400/60 hover:bg-white/5'
                       : 'text-white/30 hover:bg-white/5'
                   }`}
-                  onClick={() => { setActiveTab('settings'); setSettingsTab('storage'); }}
+                  onClick={() => { navigate('settings'); setSettingsTab('storage'); }}
                 >
                   {syncStatus.syncing ? (
                     <RefreshCw className="w-3 h-3 animate-spin" />

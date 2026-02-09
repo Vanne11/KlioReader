@@ -32,7 +32,7 @@ export function GamificationView() {
 
   return (
     <ScrollArea className="flex-1">
-      <div className="max-w-4xl mx-auto p-8 space-y-8">
+      <div className="max-w-4xl mx-auto p-4 md:p-8 space-y-8">
         <div className="text-center space-y-4">
           <div className="flex items-center justify-center gap-4">
             {userTitle && (
@@ -49,7 +49,7 @@ export function GamificationView() {
           </div>
         </div>
 
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <Card className="bg-white/5 border-white/5 p-4 text-center"><Flame className="w-6 h-6 text-orange-400 mx-auto mb-1" /><div className="text-xl font-black">{stats.streak}</div><div className="text-[9px] opacity-50 uppercase tracking-widest">Racha</div></Card>
           <Card className="bg-white/5 border-white/5 p-4 text-center"><BookOpen className="w-6 h-6 text-primary mx-auto mb-1" /><div className="text-xl font-black">{completedBooks}</div><div className="text-[9px] opacity-50 uppercase tracking-widest">Leídos</div></Card>
           <Card className="bg-white/5 border-white/5 p-4 text-center"><Trophy className="w-6 h-6 text-yellow-500 mx-auto mb-1" /><div className="text-xl font-black">{stats.xp}</div><div className="text-[9px] opacity-50 uppercase tracking-widest">XP</div></Card>
@@ -69,7 +69,7 @@ export function GamificationView() {
               </Button>
             ))}
           </div>
-          <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 gap-3">
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3">
             {filteredBadges.map(badge => {
               const rc = RARITY_CONFIG[badge.rarity];
               return (

@@ -38,9 +38,9 @@ export function LibraryView() {
 
   return (
     <>
-      <header className="h-16 border-b border-white/5 flex items-center justify-between px-8 bg-[#16161e]/50 backdrop-blur-md">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2 text-orange-400 font-bold"><Flame className="w-5 h-5 fill-current" /> {stats.streak} Días</div>
+      <header className="h-14 md:h-16 border-b border-white/5 flex items-center justify-between px-4 md:px-8 bg-[#16161e]/50 backdrop-blur-md">
+        <div className="flex items-center gap-2 md:gap-4 pl-10 md:pl-0">
+          <div className="flex items-center gap-1.5 md:gap-2 text-orange-400 font-bold"><Flame className="w-4 h-4 md:w-5 md:h-5 fill-current" /> {stats.streak} <span className="hidden md:inline">Días</span></div>
           <Separator orientation="vertical" className="h-6 opacity-10" />
           <div className="flex items-center bg-black/20 rounded-lg p-1">
             <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className={`h-8 w-8 ${libraryView === 'grid-large' ? 'bg-white/10 text-primary' : 'opacity-50'}`} onClick={() => setLibraryView('grid-large')}><LayoutGrid className="w-4 h-4" /></Button></TooltipTrigger><TooltipContent>Cuadrícula Gigante</TooltipContent></Tooltip>
@@ -60,7 +60,7 @@ export function LibraryView() {
           )}
         </div>
       </header>
-      <ScrollArea className="flex-1 p-12">
+      <ScrollArea className="flex-1 p-4 md:p-12">
         {!libraryPath && books.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-32 space-y-6">
             <FolderOpen className="w-16 h-16 opacity-15" />
@@ -76,9 +76,9 @@ export function LibraryView() {
           </div>
         ) : (
           <div className={`
-            ${libraryView === 'grid-large' ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-16' : ''}
-            ${libraryView === 'grid-mini' ? 'flex flex-wrap gap-4' : ''}
-            ${libraryView === 'grid-card' ? 'grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4' : ''}
+            ${libraryView === 'grid-large' ? 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8 md:gap-16' : ''}
+            ${libraryView === 'grid-mini' ? 'flex flex-wrap gap-3 md:gap-4' : ''}
+            ${libraryView === 'grid-card' ? 'grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-3 md:gap-4' : ''}
             ${libraryView === 'list-info' ? 'space-y-4 max-w-4xl mx-auto' : ''}
           `}>
             {books.map((book) => (

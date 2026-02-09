@@ -282,6 +282,372 @@ ENVBLOCK
     return 0
 }
 
+# ══════════════════════════════════════════════════════════════
+# SETUP COMPLETO DEL SISTEMA
+# Instala TODO lo necesario desde cero: paquetes del sistema,
+# Rust, Node, Android SDK/NDK, dependencias del proyecto.
+# ══════════════════════════════════════════════════════════════
+cmd_setup() {
+    echo ""
+    echo -e "  ${BOLD}${CYAN}⚡ Configuración Completa del Sistema${NC}"
+    separator
+    echo ""
+    info "Este asistente preparará tu sistema para desarrollar KlioReader."
+    info "Incluye: paquetes del sistema, Rust, Node.js, Android SDK/NDK"
+    info "Se pedirá contraseña para instalar paquetes del sistema."
+    echo ""
+
+    if ! confirm "¿Continuar con la configuración completa?"; then
+        return
+    fi
+
+    echo ""
+
+    # ── 1. Detectar gestor de paquetes ──────────────────────────
+    local pkg_mgr=""
+    local use_sudo=""
+    if command -v yay &>/dev/null; then
+        pkg_mgr="yay"
+    elif command -v paru &>/dev/null; then
+        pkg_mgr="paru"
+    elif command -v pacman &>/dev/null; then
+        pkg_mgr="pacman"
+        use_sudo="sudo"
+    else
+        error "No se detectó pacman/yay/paru"
+        error "Este script está diseñado para Arch Linux y derivados"
+        return 1
+    fi
+    success "Gestor de paquetes: ${WHITE}${pkg_mgr}${NC}"
+    echo ""
+
+    # ── 2. Dependencias del sistema para Tauri ──────────────────
+    step "Instalando dependencias del sistema para Tauri..."
+    echo ""
+
+    local tauri_deps=(
+        base-devel
+        webkit2gtk-4.1
+        curl
+        wget
+        file
+        openssl
+        gtk3
+        libappindicator-gtk3
+        librsvg
+        patchelf
+        unzip
+    )
+
+    $use_sudo $pkg_mgr -S --needed "${tauri_deps[@]}" || {
+        error "Falló la instalación de paquetes del sistema"
+        return 1
+    }
+    echo ""
+    success "Dependencias de Tauri listas"
+    echo ""
+
+    # ── 3. Node.js y npm ────────────────────────────────────────
+    if ! command -v node &>/dev/null; then
+        step "Instalando Node.js y npm..."
+        $use_sudo $pkg_mgr -S --needed nodejs npm || {
+            error "No se pudo instalar Node.js"
+            return 1
+        }
+        success "Node.js instalado: $(node --version)"
+    else
+        success "Node.js $(node --version) ya instalado"
+    fi
+    echo ""
+
+    # ── 4. Rust via rustup ──────────────────────────────────────
+    if [[ -f "$HOME/.cargo/env" ]]; then
+        source "$HOME/.cargo/env"
+    fi
+
+    if ! command -v rustup &>/dev/null; then
+        # rust del sistema conflicta con rustup
+        if pacman -Qi rust &>/dev/null 2>&1; then
+            warn "Rust del sistema detectado — se necesita ${WHITE}rustup${NC} para cross-compile a Android"
+            if confirm "¿Reemplazar rust del sistema con rustup?"; then
+                sudo pacman -Rns --noconfirm rust 2>/dev/null || true
+            else
+                error "Se necesita rustup para compilar a Android. Abortando."
+                return 1
+            fi
+        fi
+
+        step "Instalando Rust via rustup..."
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+        source "$HOME/.cargo/env"
+        success "Rust $(rustc --version | awk '{print $2}') instalado via rustup"
+    else
+        success "Rust $(rustc --version | awk '{print $2}') via rustup"
+    fi
+
+    # Asegurar toolchain stable por defecto
+    rustup default stable >/dev/null 2>&1
+    echo ""
+
+    # ── 5. JDK para Android ─────────────────────────────────────
+    local java_found=false
+    if [[ -x "/opt/android-studio/jbr/bin/java" ]]; then
+        export JAVA_HOME="/opt/android-studio/jbr"
+        java_found=true
+        success "Java: Android Studio JBR"
+    elif command -v java &>/dev/null; then
+        # Intentar detectar JAVA_HOME
+        local java_candidates=(
+            "/opt/android-studio/jbr"
+            "/opt/android-studio/jre"
+            "/usr/lib/jvm/default"
+            "/usr/lib/jvm/java-17-openjdk"
+            "/usr/lib/jvm/java-21-openjdk"
+        )
+        for candidate in "${java_candidates[@]}"; do
+            if [[ -x "$candidate/bin/java" ]]; then
+                export JAVA_HOME="$candidate"
+                java_found=true
+                break
+            fi
+        done
+        if $java_found; then
+            success "Java: ${WHITE}$JAVA_HOME${NC}"
+        fi
+    fi
+
+    if ! $java_found; then
+        step "Instalando JDK..."
+        $use_sudo $pkg_mgr -S --needed jdk-openjdk || {
+            error "No se pudo instalar JDK"
+            return 1
+        }
+        export JAVA_HOME="/usr/lib/jvm/default"
+        success "JDK instalado"
+    fi
+    export PATH="$JAVA_HOME/bin:$PATH"
+    echo ""
+
+    # ── 6. Android SDK ──────────────────────────────────────────
+    step "Configurando Android SDK..."
+    echo ""
+
+    # IMPORTANTE: Limpiar variables obsoletas que causan errores
+    unset NDK_HOME 2>/dev/null || true
+    unset ANDROID_NDK_HOME 2>/dev/null || true
+
+    # Detectar o crear ANDROID_HOME
+    local sdk_dir=""
+    for candidate in "$HOME/Android/Sdk" "$HOME/.android/sdk" "/opt/android-sdk"; do
+        if [[ -d "$candidate" ]]; then
+            sdk_dir="$candidate"
+            break
+        fi
+    done
+
+    if [[ -z "$sdk_dir" ]]; then
+        sdk_dir="$HOME/Android/Sdk"
+        mkdir -p "$sdk_dir"
+        info "Directorio SDK creado: ${WHITE}$sdk_dir${NC}"
+    fi
+
+    export ANDROID_HOME="$sdk_dir"
+    export ANDROID_SDK_ROOT="$sdk_dir"
+    success "ANDROID_HOME: ${WHITE}$sdk_dir${NC}"
+
+    # Buscar o descargar cmdline-tools
+    local sdkmanager=""
+    for sm_path in \
+        "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+        "$ANDROID_HOME/cmdline-tools/bin/sdkmanager" \
+        "$ANDROID_HOME/tools/bin/sdkmanager"; do
+        if [[ -x "$sm_path" ]]; then
+            sdkmanager="$sm_path"
+            break
+        fi
+    done
+
+    if [[ -z "$sdkmanager" ]]; then
+        step "Descargando Android command-line tools..."
+        local cmdline_zip="/tmp/android-cmdline-tools.zip"
+        # Versión estable de cmdline-tools (actualizar si es necesario)
+        local cmdline_url="https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
+        curl -#L -o "$cmdline_zip" "$cmdline_url" || {
+            error "No se pudo descargar cmdline-tools"
+            info "Descárgalas manualmente: ${CYAN}${cmdline_url}${NC}"
+            return 1
+        }
+
+        mkdir -p "$ANDROID_HOME/cmdline-tools"
+        unzip -q -o "$cmdline_zip" -d "$ANDROID_HOME/cmdline-tools/"
+        # El zip extrae a 'cmdline-tools/', mover a 'latest/'
+        if [[ -d "$ANDROID_HOME/cmdline-tools/cmdline-tools" ]]; then
+            rm -rf "$ANDROID_HOME/cmdline-tools/latest" 2>/dev/null || true
+            mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
+        fi
+        rm -f "$cmdline_zip"
+
+        sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+        if [[ -x "$sdkmanager" ]]; then
+            success "cmdline-tools instaladas"
+        else
+            error "No se pudo configurar sdkmanager"
+            return 1
+        fi
+    else
+        success "sdkmanager encontrado"
+    fi
+
+    # Aceptar licencias automáticamente
+    yes 2>/dev/null | "$sdkmanager" --sdk_root="$ANDROID_HOME" --licenses >/dev/null 2>&1 || true
+
+    # Instalar platform-tools (adb)
+    if [[ ! -x "$ANDROID_HOME/platform-tools/adb" ]]; then
+        step "Instalando platform-tools (adb)..."
+        yes | "$sdkmanager" --sdk_root="$ANDROID_HOME" --install "platform-tools" >/dev/null 2>&1
+        success "platform-tools instaladas"
+    else
+        success "platform-tools ya instaladas"
+    fi
+    export PATH="$ANDROID_HOME/platform-tools:$PATH"
+
+    # Instalar NDK
+    local ndk_dir=""
+    if [[ -d "$ANDROID_HOME/ndk" ]]; then
+        ndk_dir=$(find "$ANDROID_HOME/ndk" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort -V | tail -1)
+    fi
+
+    if [[ -z "$ndk_dir" ]]; then
+        step "Instalando Android NDK... (puede tardar un poco)"
+        local ndk_version
+        ndk_version=$("$sdkmanager" --sdk_root="$ANDROID_HOME" --list 2>/dev/null \
+            | grep "ndk;" | grep -v "rc" | tail -1 | awk '{print $1}')
+        [[ -z "$ndk_version" ]] && ndk_version="ndk;29.0.13846066"
+        yes | "$sdkmanager" --sdk_root="$ANDROID_HOME" --install "$ndk_version" >/dev/null 2>&1
+        ndk_dir=$(find "$ANDROID_HOME/ndk" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort -V | tail -1)
+        if [[ -d "$ndk_dir" ]]; then
+            success "NDK instalado: ${WHITE}$(basename "$ndk_dir")${NC}"
+        else
+            error "No se pudo instalar el NDK"
+            return 1
+        fi
+    else
+        success "NDK: ${WHITE}$(basename "$ndk_dir")${NC}"
+    fi
+    export NDK_HOME="$ndk_dir"
+
+    # Instalar platform (android-XX)
+    if [[ ! -d "$ANDROID_HOME/platforms" ]] || [[ -z "$(ls -A "$ANDROID_HOME/platforms" 2>/dev/null)" ]]; then
+        step "Instalando Android platform..."
+        local platform
+        platform=$("$sdkmanager" --sdk_root="$ANDROID_HOME" --list 2>/dev/null \
+            | grep "platforms;android-" | grep -v "ext" | tail -1 | awk '{print $1}')
+        [[ -z "$platform" ]] && platform="platforms;android-35"
+        yes | "$sdkmanager" --sdk_root="$ANDROID_HOME" --install "$platform" >/dev/null 2>&1
+        success "Platform instalada"
+    else
+        success "Android platform ya instalada"
+    fi
+
+    # Instalar build-tools
+    if [[ ! -d "$ANDROID_HOME/build-tools" ]] || [[ -z "$(ls -A "$ANDROID_HOME/build-tools" 2>/dev/null)" ]]; then
+        step "Instalando build-tools..."
+        local bt
+        bt=$("$sdkmanager" --sdk_root="$ANDROID_HOME" --list 2>/dev/null \
+            | grep "build-tools;" | tail -1 | awk '{print $1}')
+        [[ -z "$bt" ]] && bt="build-tools;35.0.0"
+        yes | "$sdkmanager" --sdk_root="$ANDROID_HOME" --install "$bt" >/dev/null 2>&1
+        success "Build-tools instaladas"
+    else
+        success "Build-tools ya instaladas"
+    fi
+    echo ""
+
+    # ── 7. Rust targets para Android ────────────────────────────
+    step "Verificando Rust targets para Android..."
+    local android_targets=("aarch64-linux-android" "armv7-linux-androideabi" "i686-linux-android" "x86_64-linux-android")
+    local missing_targets=()
+    local installed_targets
+    installed_targets=$(rustup target list --installed 2>/dev/null)
+
+    for target in "${android_targets[@]}"; do
+        if ! echo "$installed_targets" | grep -q "^${target}$"; then
+            missing_targets+=("$target")
+        fi
+    done
+
+    if [[ ${#missing_targets[@]} -gt 0 ]]; then
+        for target in "${missing_targets[@]}"; do
+            rustup target add "$target" >/dev/null 2>&1
+            success "Target: ${WHITE}$target${NC}"
+        done
+    else
+        success "Todos los targets Android ya instalados"
+    fi
+    echo ""
+
+    # ── 8. Persistir variables de entorno ───────────────────────
+    local shell_rc="$HOME/.bashrc"
+    [[ -f "$HOME/.zshrc" ]] && [[ "${SHELL:-}" == *"zsh"* ]] && shell_rc="$HOME/.zshrc"
+
+    # Eliminar bloque anterior si existe (puede tener rutas obsoletas)
+    if grep -q "# Android SDK (auto-klio)" "$shell_rc" 2>/dev/null; then
+        # Borrar desde la marca hasta la siguiente línea vacía o fin del bloque
+        sed -i '/# Android SDK (auto-klio)/,/^$/d' "$shell_rc"
+        info "Configuración anterior reemplazada en $(basename "$shell_rc")"
+    fi
+
+    step "Guardando variables de entorno en $(basename "$shell_rc")..."
+    cat >> "$shell_rc" << ENVBLOCK
+
+# Android SDK (auto-klio)
+export ANDROID_HOME="$ANDROID_HOME"
+export ANDROID_SDK_ROOT="\$ANDROID_HOME"
+export NDK_HOME="$NDK_HOME"
+export JAVA_HOME="$JAVA_HOME"
+export PATH="\$ANDROID_HOME/cmdline-tools/latest/bin:\$ANDROID_HOME/platform-tools:\$JAVA_HOME/bin:\$PATH"
+ENVBLOCK
+    success "Variables guardadas en $(basename "$shell_rc")"
+    echo ""
+
+    # ── 9. Dependencias del proyecto ────────────────────────────
+    step "Instalando dependencias Node.js..."
+    cd "$PROJECT_DIR" && npm install
+    echo ""
+    success "Dependencias Node.js instaladas"
+    echo ""
+
+    step "Verificando dependencias Rust... (primera vez tarda bastante)"
+    cd "$TAURI_DIR" && cargo check 2>&1
+    echo ""
+    success "Dependencias Rust verificadas"
+    echo ""
+
+    # ── 10. Inicializar proyecto Android ────────────────────────
+    if [[ ! -d "$TAURI_DIR/gen/android" ]]; then
+        step "Inicializando proyecto Android..."
+        cd "$PROJECT_DIR"
+        npm run tauri android init
+        echo ""
+        success "Proyecto Android inicializado"
+    else
+        success "Proyecto Android ya inicializado"
+    fi
+
+    echo ""
+    separator
+    echo ""
+    success "${GREEN}${BOLD}¡Sistema completamente configurado!${NC}"
+    echo ""
+    info "Ahora puedes usar:"
+    echo -e "    ${CYAN}./klio.sh dev${NC}     → Menú de desarrollo"
+    echo -e "    ${CYAN}./klio.sh build${NC}   → Compilar la app"
+    echo -e "    ${CYAN}./klio.sh doctor${NC}  → Verificar que todo esté bien"
+    echo ""
+
+    press_enter
+}
+
 # ── Helpers para firma Android ────────────────────────────────
 find_build_tools() {
     local bt_dir=""
@@ -1987,6 +2353,8 @@ main_menu() {
         echo -e "    ${WHITE}13${NC}) ${BLUE}🔍 Logs${NC}              ${DIM}— Debug y logs detallados${NC}"
         echo -e "    ${WHITE}14${NC}) ${GREEN}💾 Backup${NC}            ${DIM}— Crear respaldo del proyecto${NC}"
         echo ""
+        echo -e "    ${WHITE}15${NC}) ${BOLD}${YELLOW}⚡ Setup completo${NC}    ${DIM}— Preparar sistema desde cero${NC}"
+        echo ""
         echo -e "    ${WHITE} 0${NC}) ${RED}Salir${NC}"
         echo ""
         echo -ne "  ${YELLOW}▸${NC} Opción: "
@@ -2007,6 +2375,7 @@ main_menu() {
             12) cmd_lint ;;
             13) cmd_logs ;;
             14) cmd_backup ;;
+            15) cmd_setup ;;
             0|q|Q)
                 echo ""
                 echo -e "  ${DIM}¡Hasta luego! 📖${NC}"
@@ -2042,6 +2411,7 @@ if [[ $# -gt 0 ]]; then
         lint)     cmd_lint ;;
         logs)     cmd_logs ;;
         backup)   cmd_backup ;;
+        setup|install) cmd_setup ;;
         help|-h|--help)
             print_banner
             echo -e "  ${BOLD}Uso:${NC} ./klio.sh [comando]"
@@ -2062,6 +2432,7 @@ if [[ $# -gt 0 ]]; then
             echo -e "    lint      Verificar código"
             echo -e "    logs      Debug y logs"
             echo -e "    backup    Crear respaldo"
+            echo -e "    ${BOLD}setup${NC}     Configurar sistema desde cero (instala todo)"
             echo ""
             echo -e "  Sin argumentos abre el menú interactivo."
             echo ""

@@ -36,7 +36,7 @@ export function CloudView() {
 
   return (
     <ScrollArea className="flex-1">
-      <div className="max-w-2xl mx-auto p-12 space-y-8">
+      <div className="max-w-2xl mx-auto p-4 md:p-12 space-y-8">
         <div className="space-y-3">
           <h2 className="text-lg font-bold flex items-center gap-2"><Server className="w-5 h-5 text-primary" /> Servidor API</h2>
           <div className="flex gap-2">
@@ -141,15 +141,15 @@ export function CloudView() {
                           {cb.share_count > 0 && <Badge variant="outline" className="text-[8px] h-4 text-cyan-400 border-cyan-400/40"><Users className="w-2.5 h-2.5 mr-0.5" /> Compartido</Badge>}
                         </div>
                       </div>
-                      <div className="flex gap-1">
-                        <Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-primary/20 hover:text-primary" onClick={() => startEditCloudBook(cb)}><Pencil className="w-4 h-4" /></Button></TooltipTrigger><TooltipContent>Editar</TooltipContent></Tooltip>
-                        <Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-cyan-600/20 hover:text-cyan-400" onClick={() => openShareDialog(cb)}><Share2 className="w-4 h-4" /></Button></TooltipTrigger><TooltipContent>Compartir</TooltipContent></Tooltip>
+                      <div className="flex gap-0.5 md:gap-1 shrink-0">
+                        <Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" className="h-7 w-7 md:h-8 md:w-8 hover:bg-primary/20 hover:text-primary" onClick={() => startEditCloudBook(cb)}><Pencil className="w-3.5 h-3.5 md:w-4 md:h-4" /></Button></TooltipTrigger><TooltipContent>Editar</TooltipContent></Tooltip>
+                        <Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" className="h-7 w-7 md:h-8 md:w-8 hover:bg-cyan-600/20 hover:text-cyan-400" onClick={() => openShareDialog(cb)}><Share2 className="w-3.5 h-3.5 md:w-4 md:h-4" /></Button></TooltipTrigger><TooltipContent>Compartir</TooltipContent></Tooltip>
                         <Tooltip><TooltipTrigger asChild>
-                          <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-green-600/20 hover:text-green-400" disabled={downloadingBookId === cb.id} onClick={() => downloadBookFromCloud(cb)}>
-                            {downloadingBookId === cb.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <CloudDownload className="w-4 h-4" />}
+                          <Button size="icon" variant="ghost" className="h-7 w-7 md:h-8 md:w-8 hover:bg-green-600/20 hover:text-green-400" disabled={downloadingBookId === cb.id} onClick={() => downloadBookFromCloud(cb)}>
+                            {downloadingBookId === cb.id ? <Loader2 className="w-3.5 h-3.5 md:w-4 md:h-4 animate-spin" /> : <CloudDownload className="w-3.5 h-3.5 md:w-4 md:h-4" />}
                           </Button>
                         </TooltipTrigger><TooltipContent>Descargar a local</TooltipContent></Tooltip>
-                        <Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-red-600/20 hover:text-red-400" onClick={() => deleteCloudBook(cb.id)}><Trash2 className="w-4 h-4" /></Button></TooltipTrigger><TooltipContent>Eliminar de la nube</TooltipContent></Tooltip>
+                        <Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" className="h-7 w-7 md:h-8 md:w-8 hover:bg-red-600/20 hover:text-red-400" onClick={() => deleteCloudBook(cb.id)}><Trash2 className="w-3.5 h-3.5 md:w-4 md:h-4" /></Button></TooltipTrigger><TooltipContent>Eliminar de la nube</TooltipContent></Tooltip>
                       </div>
                     </Card>
                     {cb.share_count > 0 && (

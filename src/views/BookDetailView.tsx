@@ -22,7 +22,7 @@ export function BookDetailView() {
           <img src={coverSrc(selectedBook.cover)} className="w-full h-full object-cover blur-[100px] scale-150" alt="" />
         )}
       </div>
-      <header className="h-20 border-b border-white/5 flex items-center justify-between px-12 bg-[#16161e]/40 backdrop-blur-xl z-50">
+      <header className="h-16 md:h-20 border-b border-white/5 flex items-center justify-between px-4 md:px-12 bg-[#16161e]/40 backdrop-blur-xl z-50">
         <Button variant="ghost" onClick={() => setSelectedBook(null)} className="gap-2 hover:bg-white/5 group transition-all">
           <ChevronLeft className="w-5 h-5 group-hover:-translate-x-1 transition-transform" />
           <span className="font-bold tracking-tight text-sm">BIBLIOTECA</span>
@@ -32,15 +32,15 @@ export function BookDetailView() {
             <p className="text-[10px] font-bold opacity-40 uppercase tracking-[0.2em] mb-0.5">Estado</p>
             <p className="text-xs font-black text-amber-400 uppercase">{selectedBook.progress === 0 ? 'Sin empezar' : `Leído ${selectedBook.progress}%`}</p>
           </div>
-          <Button onClick={() => readBook(selectedBook)} className="gap-3 bg-primary hover:bg-primary/90 text-primary-foreground font-black px-10 py-6 rounded-full shadow-[0_10px_30px_rgba(var(--primary),0.3)] hover:scale-105 transition-all active:scale-95">
+          <Button onClick={() => readBook(selectedBook)} className="gap-2 md:gap-3 bg-primary hover:bg-primary/90 text-primary-foreground font-black px-6 py-4 md:px-10 md:py-6 rounded-full shadow-[0_10px_30px_rgba(var(--primary),0.3)] hover:scale-105 transition-all active:scale-95">
             <Play className="w-5 h-5 fill-current" />
             <span className="tracking-widest uppercase">Leer Libro</span>
           </Button>
         </div>
       </header>
       <ScrollArea className="flex-1 z-10">
-        <div className="max-w-6xl mx-auto px-12 py-16">
-          <div className="flex flex-col lg:flex-row gap-20 items-start">
+        <div className="max-w-6xl mx-auto px-4 py-8 md:px-12 md:py-16">
+          <div className="flex flex-col lg:flex-row gap-8 md:gap-20 items-start">
             <div className="w-full lg:w-[400px] shrink-0 mx-auto lg:mx-0">
               <div className="relative group">
                 <div className="absolute -inset-4 bg-primary/20 rounded-[2rem] blur-2xl opacity-0 group-hover:opacity-100 transition-duration-700" />
@@ -70,7 +70,7 @@ export function BookDetailView() {
             <div className="flex-1 space-y-12">
               <div className="space-y-4">
                 <Badge className="bg-primary/10 text-primary hover:bg-primary/20 border-none px-4 py-1.5 rounded-full text-[10px] font-black tracking-widest uppercase">Información del libro</Badge>
-                <h1 className="text-5xl lg:text-7xl font-black leading-[1.1] tracking-tight text-white drop-shadow-2xl">{selectedBook.title}</h1>
+                <h1 className="text-3xl md:text-5xl lg:text-7xl font-black leading-[1.1] tracking-tight text-white drop-shadow-2xl">{selectedBook.title}</h1>
                 <div className="flex items-center gap-4 pt-2">
                   <div className="w-12 h-0.5 bg-primary/50" />
                   <p className="text-2xl font-medium italic text-primary/80 tracking-tight">{selectedBook.author}</p>

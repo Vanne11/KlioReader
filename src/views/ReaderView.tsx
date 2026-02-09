@@ -3,6 +3,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import {
   X, ZoomIn, ZoomOut, Scroll as ScrollIcon, Columns2, Square, Maximize, Minimize,
   Settings2, StickyNote, Bookmark as BookmarkIcon, Plus, MessageSquare,
+  ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -16,6 +17,7 @@ import { useNotesStore } from '@/stores/notesStore';
 import { useReader } from '@/hooks/useReader';
 import { useReaderNotes } from '@/hooks/useReaderNotes';
 import { useKeyboard } from '@/hooks/useKeyboard';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import { EpubImage } from '@/components/shared/EpubImage';
 import { themeClasses, READER_FONTS } from '@/lib/constants';
 import * as api from '@/lib/api';
@@ -39,6 +41,7 @@ export function ReaderView() {
   const { addReaderNote, deleteReaderNote, addReaderBookmark, deleteReaderBookmark, loadReaderNotesAndBookmarks } = useReaderNotes();
 
   useKeyboard();
+  const isMobile = useIsMobile();
 
   // Load notes when book changes
   useEffect(() => {
@@ -108,14 +111,14 @@ export function ReaderView() {
 
   return (
     <div ref={containerRef} className={`flex flex-col h-screen ${themeClasses[readerTheme]} transition-colors duration-300`}>
-      <header className="flex items-center justify-between p-3 border-b border-white/10 backdrop-blur-md sticky top-0 z-50">
-        <div className="flex items-center gap-3">
+      <header className="flex items-center justify-between p-2 md:p-3 border-b border-white/10 backdrop-blur-md sticky top-0 z-50">
+        <div className="flex items-center gap-1 md:gap-3">
           <Button variant="ghost" size="icon" onClick={() => setCurrentBook(null)}><X className="w-5 h-5" /></Button>
-          <div className="max-w-[200px]"><h2 className="text-xs font-bold truncate leading-none mb-1">{currentBook.title}</h2><p className="text-[10px] opacity-50 uppercase">{currentBook.progress}%</p></div>
+          <div className="max-w-[120px] md:max-w-[200px]"><h2 className="text-xs font-bold truncate leading-none mb-1">{currentBook.title}</h2><p className="text-[10px] opacity-50 uppercase">{currentBook.progress}%</p></div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 md:gap-2">
           <Dialog>
-            <DialogTrigger asChild><Button variant="ghost" size="icon" className="h-9 w-9 bg-black/20 rounded-full"><Settings2 className="w-5 h-5" /></Button></DialogTrigger>
+            <DialogTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8 md:h-9 md:w-9 bg-black/20 rounded-full"><Settings2 className="w-4 h-4 md:w-5 md:h-5" /></Button></DialogTrigger>
             <DialogContent className="sm:max-w-[425px] bg-[#16161e] border-white/10 text-white">
               <DialogHeader><DialogTitle>Ajustes de Lectura</DialogTitle></DialogHeader>
               <div className="py-6 space-y-8">
@@ -159,37 +162,39 @@ export function ReaderView() {
           {api.isLoggedIn() && (
             <>
               <Tooltip><TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className={`h-9 w-9 rounded-full ${showNotesPanel ? 'bg-primary/30 text-primary' : 'bg-black/20'}`} onClick={() => setShowNotesPanel(p => !p)}><StickyNote className="w-5 h-5" /></Button>
+                <Button variant="ghost" size="icon" className={`h-8 w-8 md:h-9 md:w-9 rounded-full ${showNotesPanel ? 'bg-primary/30 text-primary' : 'bg-black/20'}`} onClick={() => setShowNotesPanel(p => !p)}><StickyNote className="w-4 h-4 md:w-5 md:h-5" /></Button>
               </TooltipTrigger><TooltipContent>Notas</TooltipContent></Tooltip>
               <Tooltip><TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className={`h-9 w-9 rounded-full ${readerBookmarks.some(b => b.chapter_index === currentBook.currentChapter && b.page_index === currentPageInChapter) ? 'bg-amber-500/30 text-amber-400' : 'bg-black/20'}`} onClick={addReaderBookmark}><BookmarkIcon className="w-5 h-5" /></Button>
+                <Button variant="ghost" size="icon" className={`h-8 w-8 md:h-9 md:w-9 rounded-full ${readerBookmarks.some(b => b.chapter_index === currentBook.currentChapter && b.page_index === currentPageInChapter) ? 'bg-amber-500/30 text-amber-400' : 'bg-black/20'}`} onClick={addReaderBookmark}><BookmarkIcon className="w-4 h-4 md:w-5 md:h-5" /></Button>
               </TooltipTrigger><TooltipContent>Marcar página</TooltipContent></Tooltip>
             </>
           )}
-          <Separator orientation="vertical" className="h-6 opacity-10 mx-2" />
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={() => changePage(-1)} disabled={currentBook.currentChapter === 0 && currentPageInChapter === 0}>Anterior</Button>
-            <div className="text-[10px] font-bold px-3 py-1 bg-primary/10 rounded">
+          <Separator orientation="vertical" className="h-6 opacity-10 mx-1 md:mx-2 hidden md:block" />
+          <div className="flex items-center gap-1 md:gap-2">
+            <Button variant="ghost" size="icon" className="md:hidden h-8 w-8" onClick={() => changePage(-1)} disabled={currentBook.currentChapter === 0 && currentPageInChapter === 0}><ChevronLeft className="w-4 h-4" /></Button>
+            <Button variant="ghost" size="sm" className="hidden md:inline-flex" onClick={() => changePage(-1)} disabled={currentBook.currentChapter === 0 && currentPageInChapter === 0}>Anterior</Button>
+            <div className="text-[9px] md:text-[10px] font-bold px-2 md:px-3 py-1 bg-primary/10 rounded whitespace-nowrap">
               {readView === 'paginated' && currentBook.type === 'epub'
-                ? `Pág ${currentPageInChapter + 1}/${totalPagesInChapter} · Cap ${currentBook.currentChapter + 1}/${currentBook.total_chapters}`
+                ? (isMobile ? `${currentPageInChapter + 1}/${totalPagesInChapter}` : `Pág ${currentPageInChapter + 1}/${totalPagesInChapter} · Cap ${currentBook.currentChapter + 1}/${currentBook.total_chapters}`)
                 : `${currentBook.currentChapter + 1} / ${currentBook.type === 'pdf' ? numPages : currentBook.total_chapters}`}
             </div>
-            <Button variant="ghost" size="sm" onClick={() => changePage(1)}>Siguiente</Button>
+            <Button variant="ghost" size="icon" className="md:hidden h-8 w-8" onClick={() => changePage(1)}><ChevronRight className="w-4 h-4" /></Button>
+            <Button variant="ghost" size="sm" className="hidden md:inline-flex" onClick={() => changePage(1)}>Siguiente</Button>
           </div>
-          <Separator orientation="vertical" className="h-6 opacity-10 mx-2" />
-          <Button variant="ghost" size="icon" onClick={toggleFullscreen}>{isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}</Button>
+          <Separator orientation="vertical" className="h-6 opacity-10 mx-1 md:mx-2 hidden md:block" />
+          <Button variant="ghost" size="icon" className="hidden md:inline-flex" onClick={toggleFullscreen}>{isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}</Button>
         </div>
       </header>
 
       <div className="flex-1 flex overflow-hidden">
         <div ref={readerRef} className={`flex-1 ${readView === 'paginated' ? 'overflow-hidden' : 'overflow-y-auto overflow-x-hidden no-scrollbar'}`}>
           {readView === 'paginated' && currentBook.type === 'epub' ? (
-            <div className="h-full py-12 px-12">
+            <div className="h-full py-6 px-4 md:py-12 md:px-12">
               <div className="overflow-hidden" style={{ height: pageHeight > 0 ? `${pageHeight}px` : '100%' }}>
                 <div
                   ref={contentRef}
                   key={currentBook.id + '-' + currentBook.currentChapter + '-' + fontSize}
-                  className="mx-auto max-w-2xl font-serif selection:bg-primary/30 break-words"
+                  className="mx-auto max-w-full md:max-w-2xl font-serif selection:bg-primary/30 break-words"
                   style={{
                     fontSize: `${fontSize}px`,
                     lineHeight: '1.8',
@@ -205,7 +210,7 @@ export function ReaderView() {
           ) : (
             <div
               key={currentBook.id + '-' + currentBook.currentChapter + '-' + readView + '-' + fontSize}
-              className="mx-auto py-12 px-12 font-serif selection:bg-primary/30 break-words max-w-2xl"
+              className="mx-auto py-6 px-4 md:py-12 md:px-12 font-serif selection:bg-primary/30 break-words max-w-full md:max-w-2xl"
               style={{ fontSize: `${fontSize}px`, lineHeight: '1.8', fontFamily: readerFont }}
             >
               {currentBook.type === 'epub' ? (
@@ -222,7 +227,7 @@ export function ReaderView() {
         </div>
 
         {showNotesPanel && (
-          <aside className="w-80 border-l border-white/10 bg-[#16161e]/90 backdrop-blur-md flex flex-col overflow-hidden">
+          <aside className={`${isMobile ? 'fixed inset-0 z-50' : 'w-80'} border-l border-white/10 bg-[#16161e]/95 backdrop-blur-md flex flex-col overflow-hidden`}>
             <div className="p-4 border-b border-white/10 flex items-center justify-between">
               <h3 className="text-sm font-bold flex items-center gap-2"><MessageSquare className="w-4 h-4 text-primary" /> Notas y Marcadores</h3>
               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setShowNotesPanel(false)}><X className="w-4 h-4" /></Button>

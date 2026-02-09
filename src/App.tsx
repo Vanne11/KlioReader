@@ -4,6 +4,7 @@ import { useUIStore } from '@/stores/uiStore';
 import { usePersistence } from '@/hooks/usePersistence';
 import { useSyncQueue } from '@/hooks/useSyncQueue';
 import { useGamification } from '@/hooks/useGamification';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import { ReaderView } from '@/views/ReaderView';
 import { BookDetailView } from '@/views/BookDetailView';
 import { LibraryView } from '@/views/LibraryView';
@@ -18,6 +19,7 @@ function App() {
   usePersistence();
   useSyncQueue();
   useGamification();
+  useIsMobile();
 
   const activeTab = useUIStore(s => s.activeTab);
   const currentBook = useReaderStore(s => s.currentBook);
