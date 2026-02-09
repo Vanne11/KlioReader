@@ -25,17 +25,22 @@ TAURI_DIR="$PROJECT_DIR/src-tauri"
 BACKEND_DIR="$PROJECT_DIR/backend-php"
 APP_NAME="KlioReader"
 APP_VERSION=$(grep -o '"version": *"[^"]*"' "$TAURI_DIR/tauri.conf.json" | head -1 | cut -d'"' -f4)
+BUILDS_DIR="$PROJECT_DIR/builds"
+KEYSTORE_DIR="$PROJECT_DIR/.keystore"
+KEYSTORE_FILE="$KEYSTORE_DIR/klio-release.keystore"
+KEYSTORE_CONF="$KEYSTORE_DIR/keystore.conf"
+KEYSTORE_ALIAS="klio"
 
 # ── Funciones de utilidad ──────────────────────────────────────
 print_banner() {
     echo -e "${CYAN}"
-    echo "  ╔═══════════════════════════════════════════════════╗"
-    echo "  ║                                                   ║"
-    echo "  ║   📖  ${WHITE}K L I O   R E A D E R${CYAN}   DevTool            ║"
-    echo "  ║                                                   ║"
-    echo "  ║   ${DIM}${CYAN}v${APP_VERSION}  •  Tauri + React + PHP${NC}${CYAN}              ║"
-    echo "  ║                                                   ║"
-    echo "  ╚═══════════════════════════════════════════════════╝"
+    echo -e "  ╔═══════════════════════════════════════════════════╗"
+    echo -e "  ║                                                   ║"
+    echo -e "  ║   📖  ${WHITE}K L I O   R E A D E R${CYAN}   DevTool            ║"
+    echo -e "  ║                                                   ║"
+    echo -e "  ║   ${DIM}${CYAN}v${APP_VERSION}  •  Tauri + React + PHP${NC}${CYAN}              ║"
+    echo -e "  ║                                                   ║"
+    echo -e "  ╚═══════════════════════════════════════════════════╝"
     echo -e "${NC}"
 }
 
@@ -70,41 +75,432 @@ check_project() {
     fi
 }
 
-# ── Verificar entorno Android ──────────────────────────────────
+# ── Verificar y configurar entorno Android ───────────────────
+# Auto-detecta SDK, NDK, Java y rustup targets.
+# Instala lo que falte sin necesidad de intervención manual.
 check_android_env() {
-    local missing=false
+    local changed=false
 
-    if [[ -z "${ANDROID_HOME:-}" ]] && [[ -z "${ANDROID_SDK_ROOT:-}" ]]; then
-        warn "ANDROID_HOME o ANDROID_SDK_ROOT no están definidos"
-        info "Necesitas instalar Android SDK y configurar la variable de entorno"
-        info "  Arch: ${CYAN}sudo pacman -S android-tools${NC} + Android Studio o cmdline-tools"
-        info "  Ubuntu: ${CYAN}sudo apt install android-sdk${NC}"
-        info "  O instala Android Studio desde ${CYAN}https://developer.android.com/studio${NC}"
-        missing=true
+    # ── 1. Detectar / configurar ANDROID_HOME ────────────────
+    if [[ -z "${ANDROID_HOME:-}" ]] || [[ ! -d "${ANDROID_HOME}" ]]; then
+        # Buscar SDK en ubicaciones comunes
+        local sdk_candidates=(
+            "$HOME/Android/Sdk"
+            "$HOME/.android/sdk"
+            "/opt/android-sdk"
+            "$HOME/Library/Android/sdk"
+        )
+        local found_sdk=""
+        for candidate in "${sdk_candidates[@]}"; do
+            if [[ -d "$candidate" ]]; then
+                found_sdk="$candidate"
+                break
+            fi
+        done
+
+        if [[ -z "$found_sdk" ]]; then
+            error "No se encontró Android SDK en ninguna ubicación conocida"
+            info "Instala Android Studio desde ${CYAN}https://developer.android.com/studio${NC}"
+            info "O instala las cmdline-tools y configura ANDROID_HOME manualmente"
+            return 1
+        fi
+
+        export ANDROID_HOME="$found_sdk"
+        export ANDROID_SDK_ROOT="$found_sdk"
+        success "SDK detectado: ${WHITE}$found_sdk${NC}"
+        changed=true
     fi
 
-    if [[ -z "${JAVA_HOME:-}" ]]; then
-        if ! command -v java &>/dev/null; then
-            warn "Java/JDK no encontrado (necesario para Android)"
+    # ── 2. Detectar / configurar JAVA_HOME ───────────────────
+    if [[ -z "${JAVA_HOME:-}" ]] || [[ ! -d "${JAVA_HOME}" ]]; then
+        local java_candidates=(
+            "/opt/android-studio/jbr"
+            "/opt/android-studio/jre"
+            "/usr/lib/jvm/default"
+            "/usr/lib/jvm/java-17-openjdk"
+            "/usr/lib/jvm/java-21-openjdk"
+        )
+        local found_java=""
+        for candidate in "${java_candidates[@]}"; do
+            if [[ -x "$candidate/bin/java" ]]; then
+                found_java="$candidate"
+                break
+            fi
+        done
+
+        if [[ -z "$found_java" ]]; then
+            error "No se encontró Java/JDK"
             info "  Arch: ${CYAN}sudo pacman -S jdk-openjdk${NC}"
-            info "  Ubuntu: ${CYAN}sudo apt install default-jdk${NC}"
-            missing=true
+            info "  O instala Android Studio (incluye JBR)"
+            return 1
+        fi
+
+        export JAVA_HOME="$found_java"
+        export PATH="$JAVA_HOME/bin:$PATH"
+        success "Java detectado: ${WHITE}$found_java${NC}"
+        changed=true
+    fi
+
+    # ── 3. Asegurar cmdline-tools / sdkmanager ───────────────
+    local sdkmanager=""
+    for sm_path in \
+        "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+        "$ANDROID_HOME/cmdline-tools/bin/sdkmanager" \
+        "$ANDROID_HOME/tools/bin/sdkmanager"; do
+        if [[ -x "$sm_path" ]]; then
+            sdkmanager="$sm_path"
+            break
+        fi
+    done
+
+    if [[ -z "$sdkmanager" ]]; then
+        warn "sdkmanager no encontrado en el SDK"
+        info "Abre Android Studio → SDK Manager → instala Command-line Tools"
+        info "O descárgalas de ${CYAN}https://developer.android.com/studio#command-tools${NC}"
+        return 1
+    fi
+
+    # ── 4. Instalar platform-tools si falta (para adb) ───────
+    if [[ ! -x "$ANDROID_HOME/platform-tools/adb" ]]; then
+        info "Instalando platform-tools (adb)..."
+        yes | "$sdkmanager" --sdk_root="$ANDROID_HOME" --install "platform-tools" >/dev/null 2>&1
+        if [[ -x "$ANDROID_HOME/platform-tools/adb" ]]; then
+            success "platform-tools instalado"
+        else
+            warn "No se pudo instalar platform-tools"
         fi
     fi
+    export PATH="$ANDROID_HOME/platform-tools:$PATH"
 
-    if ! command -v adb &>/dev/null; then
-        warn "adb no encontrado (Android Debug Bridge)"
-        missing=true
+    # ── 5. Instalar NDK si falta ─────────────────────────────
+    local ndk_dir=""
+    if [[ -d "$ANDROID_HOME/ndk" ]]; then
+        # Usar la versión más reciente disponible
+        ndk_dir=$(find "$ANDROID_HOME/ndk" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort -V | tail -1)
     fi
 
-    if $missing; then
-        echo ""
-        warn "Faltan dependencias de Android. El build/dev puede fallar."
-        if ! confirm "¿Continuar de todos modos?"; then
+    if [[ -z "$ndk_dir" ]] || [[ ! -d "$ndk_dir" ]]; then
+        info "NDK no encontrado. Instalando..."
+        # Obtener la última versión de NDK disponible
+        local ndk_version
+        ndk_version=$("$sdkmanager" --sdk_root="$ANDROID_HOME" --list 2>/dev/null \
+            | grep "ndk;" | grep -v "rc" | tail -1 | awk '{print $1}')
+        if [[ -z "$ndk_version" ]]; then
+            ndk_version="ndk;29.0.13846066"
+        fi
+        step "Instalando ${CYAN}${ndk_version}${NC}... (puede tardar)"
+        yes | "$sdkmanager" --sdk_root="$ANDROID_HOME" --install "$ndk_version" >/dev/null 2>&1
+        ndk_dir=$(find "$ANDROID_HOME/ndk" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort -V | tail -1)
+        if [[ -d "$ndk_dir" ]]; then
+            success "NDK instalado: ${WHITE}$(basename "$ndk_dir")${NC}"
+        else
+            error "No se pudo instalar el NDK"
             return 1
         fi
     fi
+    export NDK_HOME="$ndk_dir"
+
+    # ── 6. Instalar platforms y build-tools si faltan ────────
+    if [[ ! -d "$ANDROID_HOME/platforms" ]] || [[ -z "$(ls -A "$ANDROID_HOME/platforms" 2>/dev/null)" ]]; then
+        info "Instalando platform Android..."
+        local platform
+        platform=$("$sdkmanager" --sdk_root="$ANDROID_HOME" --list 2>/dev/null \
+            | grep "platforms;android-" | grep -v "ext" | tail -1 | awk '{print $1}')
+        [[ -z "$platform" ]] && platform="platforms;android-35"
+        yes | "$sdkmanager" --sdk_root="$ANDROID_HOME" --install "$platform" >/dev/null 2>&1
+        success "Platform instalada"
+    fi
+
+    if [[ ! -d "$ANDROID_HOME/build-tools" ]] || [[ -z "$(ls -A "$ANDROID_HOME/build-tools" 2>/dev/null)" ]]; then
+        info "Instalando build-tools..."
+        local bt
+        bt=$("$sdkmanager" --sdk_root="$ANDROID_HOME" --list 2>/dev/null \
+            | grep "build-tools;" | tail -1 | awk '{print $1}')
+        [[ -z "$bt" ]] && bt="build-tools;35.0.0"
+        yes | "$sdkmanager" --sdk_root="$ANDROID_HOME" --install "$bt" >/dev/null 2>&1
+        success "Build-tools instaladas"
+    fi
+
+    # ── 7. Verificar rustup y targets Android ────────────────
+    if [[ -f "$HOME/.cargo/env" ]]; then
+        source "$HOME/.cargo/env"
+    fi
+
+    if ! command -v rustup &>/dev/null; then
+        error "rustup no encontrado"
+        echo ""
+        info "Rust debe instalarse via ${CYAN}rustup${NC} (no via pacman) para compilar a Android"
+        info "Si tienes Rust de sistema, desinstálalo primero:"
+        echo -e "    ${CYAN}sudo pacman -Rns rust${NC}   ${DIM}(Arch)${NC}"
+        echo ""
+        info "Luego instala rustup:"
+        echo -e "    ${CYAN}curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh${NC}"
+        return 1
+    fi
+
+    local android_targets=("aarch64-linux-android" "armv7-linux-androideabi" "i686-linux-android" "x86_64-linux-android")
+    local missing_targets=()
+    local installed_targets
+    installed_targets=$(rustup target list --installed 2>/dev/null)
+
+    for target in "${android_targets[@]}"; do
+        if ! echo "$installed_targets" | grep -q "^${target}$"; then
+            missing_targets+=("$target")
+        fi
+    done
+
+    if [[ ${#missing_targets[@]} -gt 0 ]]; then
+        info "Instalando targets Rust para Android..."
+        for target in "${missing_targets[@]}"; do
+            rustup target add "$target" >/dev/null 2>&1
+            success "Target: ${WHITE}$target${NC}"
+        done
+    fi
+
+    # ── 8. Persistir en .bashrc si hubo cambios ──────────────
+    if $changed; then
+        local bashrc="$HOME/.bashrc"
+        if ! grep -q "# Android SDK (auto-klio)" "$bashrc" 2>/dev/null; then
+            echo ""
+            if confirm "¿Guardar configuración Android en .bashrc para futuras sesiones?"; then
+                cat >> "$bashrc" << ENVBLOCK
+
+# Android SDK (auto-klio)
+export ANDROID_HOME="$ANDROID_HOME"
+export ANDROID_SDK_ROOT="\$ANDROID_HOME"
+export NDK_HOME="$NDK_HOME"
+export JAVA_HOME="$JAVA_HOME"
+export PATH="\$ANDROID_HOME/cmdline-tools/latest/bin:\$ANDROID_HOME/cmdline-tools/bin:\$ANDROID_HOME/platform-tools:\$JAVA_HOME/bin:\$PATH"
+ENVBLOCK
+                success "Configuración guardada en .bashrc"
+            fi
+        fi
+    fi
+
+    echo ""
+    success "Entorno Android ${GREEN}listo${NC}"
     return 0
+}
+
+# ── Helpers para firma Android ────────────────────────────────
+find_build_tools() {
+    local bt_dir=""
+    if [[ -n "${ANDROID_HOME:-}" ]]; then
+        bt_dir=$(find "$ANDROID_HOME/build-tools" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort -V | tail -1)
+    fi
+    if [[ -z "$bt_dir" ]]; then
+        # Buscar en ubicaciones comunes
+        for candidate in "$HOME/Android/Sdk" "$HOME/.android/sdk" "/opt/android-sdk"; do
+            if [[ -d "$candidate/build-tools" ]]; then
+                bt_dir=$(find "$candidate/build-tools" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort -V | tail -1)
+                [[ -n "$bt_dir" ]] && break
+            fi
+        done
+    fi
+    echo "$bt_dir"
+}
+
+ensure_keystore() {
+    if [[ -f "$KEYSTORE_FILE" ]] && [[ -f "$KEYSTORE_CONF" ]]; then
+        return 0
+    fi
+
+    echo ""
+    info "No se encontró firma (keystore). Se creará una automáticamente."
+    info "La firma es necesaria para instalar el APK en tu celular."
+    echo ""
+
+    # Pedir password o generar una
+    local ks_pass=""
+    echo -e "  ${WHITE}Elige una contraseña para proteger tu firma:${NC}"
+    echo -e "    ${WHITE}1${NC}) ${GREEN}Automática${NC}  ${DIM}— Se genera y guarda sola (recomendado)${NC}"
+    echo -e "    ${WHITE}2${NC}) ${YELLOW}Manual${NC}      ${DIM}— Tú eliges la contraseña${NC}"
+    echo -ne "  ${YELLOW}▸${NC} Opción [1]: "
+    read -r pass_opt
+    [[ -z "$pass_opt" ]] && pass_opt="1"
+
+    if [[ "$pass_opt" == "2" ]]; then
+        echo -ne "  ${YELLOW}?${NC}  Contraseña (mínimo 6 caracteres): "
+        read -rs ks_pass
+        echo ""
+        if [[ ${#ks_pass} -lt 6 ]]; then
+            error "La contraseña debe tener al menos 6 caracteres"
+            return 1
+        fi
+    else
+        ks_pass="klio$(date +%s | sha256sum | head -c 16)"
+        info "Contraseña generada automáticamente"
+    fi
+
+    mkdir -p "$KEYSTORE_DIR"
+
+    step "Generando keystore..."
+    if keytool -genkey -v \
+        -keystore "$KEYSTORE_FILE" \
+        -alias "$KEYSTORE_ALIAS" \
+        -keyalg RSA -keysize 2048 -validity 10000 \
+        -storepass "$ks_pass" -keypass "$ks_pass" \
+        -dname "CN=${APP_NAME}, OU=Dev, O=${APP_NAME}, L=Unknown, ST=Unknown, C=XX" \
+        >/dev/null 2>&1; then
+
+        # Guardar configuración
+        cat > "$KEYSTORE_CONF" << KSEOF
+# Configuración del keystore — NO compartas este archivo
+# Generado: $(date '+%Y-%m-%d %H:%M:%S')
+KEYSTORE_PASSWORD=${ks_pass}
+KEY_ALIAS=${KEYSTORE_ALIAS}
+KSEOF
+        chmod 600 "$KEYSTORE_CONF"
+        chmod 600 "$KEYSTORE_FILE"
+
+        echo ""
+        success "Firma creada exitosamente"
+        info "Archivos guardados en: ${CYAN}.keystore/${NC}"
+        warn "IMPORTANTE: Haz backup de la carpeta ${WHITE}.keystore/${NC}"
+        warn "Si la pierdes, no podrás actualizar tu app en celulares donde ya esté instalada."
+        echo ""
+        return 0
+    else
+        error "No se pudo crear el keystore"
+        info "Asegúrate de tener ${CYAN}keytool${NC} instalado (viene con Java/JDK)"
+        return 1
+    fi
+}
+
+load_keystore_conf() {
+    if [[ -f "$KEYSTORE_CONF" ]]; then
+        source "$KEYSTORE_CONF"
+        return 0
+    fi
+    return 1
+}
+
+# Recolectar artefactos, firmar APKs y limpiar intermedios
+collect_and_clean() {
+    local build_type="$1"  # "desktop", "android", "both"
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d_%H-%M-%S')
+    local out_dir="$BUILDS_DIR/${APP_NAME}-v${APP_VERSION}_${timestamp}"
+
+    mkdir -p "$out_dir"
+
+    echo ""
+    separator
+    step "Recolectando artefactos en ${CYAN}builds/${NC}..."
+    echo ""
+
+    local count=0
+
+    # ── Desktop artifacts ──
+    if [[ "$build_type" == "desktop" || "$build_type" == "both" ]]; then
+        local bundle_dir="$TAURI_DIR/target/release/bundle"
+        if [[ -d "$bundle_dir" ]]; then
+            find "$bundle_dir" -maxdepth 2 -type f \( \
+                -name "*.deb" -o -name "*.rpm" -o -name "*.AppImage" \
+                -o -name "*.exe" -o -name "*.msi" -o -name "*.dmg" \
+            \) 2>/dev/null | while read -r f; do
+                local fname size
+                fname=$(basename "$f")
+                size=$(du -h "$f" | cut -f1)
+                cp "$f" "$out_dir/$fname"
+                success "${fname} ${DIM}(${size})${NC}"
+            done
+            # Contar lo copiado
+            count=$(find "$out_dir" -maxdepth 1 -type f \( \
+                -name "*.deb" -o -name "*.rpm" -o -name "*.AppImage" \
+                -o -name "*.exe" -o -name "*.msi" -o -name "*.dmg" \
+            \) 2>/dev/null | wc -l)
+        fi
+
+        # Limpiar bundles intermedios (NO target/ completo, eso es cache de Rust)
+        if [[ -d "$bundle_dir" ]]; then
+            rm -rf "$bundle_dir"
+        fi
+    fi
+
+    # ── Android artifacts ──
+    if [[ "$build_type" == "android" || "$build_type" == "both" ]]; then
+        local android_out="$TAURI_DIR/gen/android/app/build/outputs"
+        if [[ -d "$android_out" ]]; then
+            # Buscar APKs y AABs
+            find "$android_out" -type f \( -name "*.apk" -o -name "*.aab" \) 2>/dev/null | while read -r f; do
+                local fname size
+                fname=$(basename "$f")
+                size=$(du -h "$f" | cut -f1)
+                cp "$f" "$out_dir/$fname"
+                success "${fname} ${DIM}(${size})${NC}"
+            done
+
+            # Firmar APKs si hay keystore
+            if [[ -f "$KEYSTORE_FILE" ]] && [[ -f "$KEYSTORE_CONF" ]]; then
+                local bt_dir
+                bt_dir=$(find_build_tools)
+                if [[ -n "$bt_dir" ]] && [[ -x "$bt_dir/zipalign" ]] && [[ -x "$bt_dir/apksigner" ]]; then
+                    load_keystore_conf
+                    echo ""
+                    step "Firmando APKs..."
+                    find "$out_dir" -maxdepth 1 -name "*.apk" ! -name "*-signed.apk" 2>/dev/null | while read -r apk; do
+                        local apk_name
+                        apk_name=$(basename "$apk" .apk)
+                        local clean_name="${apk_name/-unsigned/}"
+                        local aligned="$out_dir/${clean_name}-aligned.apk"
+                        local signed="$out_dir/${clean_name}-signed.apk"
+
+                        if "$bt_dir/zipalign" -f 4 "$apk" "$aligned" 2>/dev/null; then
+                            if "$bt_dir/apksigner" sign \
+                                --ks "$KEYSTORE_FILE" \
+                                --ks-key-alias "$KEY_ALIAS" \
+                                --ks-pass "pass:${KEYSTORE_PASSWORD}" \
+                                --key-pass "pass:${KEYSTORE_PASSWORD}" \
+                                --out "$signed" \
+                                "$aligned" 2>/dev/null; then
+                                rm -f "$aligned"
+                                local ssize
+                                ssize=$(du -h "$signed" | cut -f1)
+                                success "Firmado: ${WHITE}$(basename "$signed")${NC} ${DIM}(${ssize})${NC}"
+                            else
+                                rm -f "$aligned"
+                                warn "No se pudo firmar $(basename "$apk")"
+                            fi
+                        fi
+                    done
+                fi
+            else
+                echo ""
+                info "Sin keystore — APKs sin firmar. Usa ${CYAN}./klio.sh sign${NC} después."
+            fi
+
+            count=$((count + $(find "$out_dir" -maxdepth 1 -type f \( -name "*.apk" -o -name "*.aab" \) 2>/dev/null | wc -l)))
+        fi
+
+        # Limpiar intermedios de Android (lo pesado)
+        rm -rf "$TAURI_DIR/gen/android/app/build" 2>/dev/null
+        rm -rf "$TAURI_DIR/gen/android/.gradle" 2>/dev/null
+    fi
+
+    # Resultado
+    echo ""
+    separator
+    if [[ "$count" -gt 0 ]]; then
+        local out_size
+        out_size=$(du -sh "$out_dir" 2>/dev/null | cut -f1)
+        success "Artefactos guardados en:"
+        echo -e "    ${CYAN}${out_dir}/${NC} ${DIM}(${out_size})${NC}"
+        echo ""
+        # Listar contenido final
+        find "$out_dir" -maxdepth 1 -type f 2>/dev/null | sort | while read -r f; do
+            local fname size
+            fname=$(basename "$f")
+            size=$(du -h "$f" | cut -f1)
+            echo -e "    ${GREEN}→${NC} ${WHITE}${fname}${NC} ${DIM}(${size})${NC}"
+        done
+        echo ""
+        success "Intermedios limpiados automáticamente"
+    else
+        # Nada que recolectar, borrar carpeta vacía
+        rmdir "$out_dir" 2>/dev/null
+        warn "No se encontraron artefactos para recolectar"
+    fi
 }
 
 # ══════════════════════════════════════════════════════════════
@@ -311,30 +707,9 @@ cmd_build_desktop() {
     if npm run tauri build -- --bundles "$bundle_arg" $extra_args; then
         local elapsed=$(( SECONDS - start_time ))
         echo ""
-        separator
-        success "Build completado en ${GREEN}${elapsed}s${NC}"
-        echo ""
+        success "Build Desktop completado en ${GREEN}${elapsed}s${NC}"
 
-        # Mostrar ubicación de los artefactos
-        local target_dir="$TAURI_DIR/target"
-        if [[ "$build_mode" == "2" ]]; then
-            target_dir="$target_dir/debug"
-        else
-            target_dir="$target_dir/release"
-        fi
-
-        info "Artefactos en:"
-        if [[ -d "$target_dir/bundle" ]]; then
-            find "$target_dir/bundle" -maxdepth 2 -type f \( \
-                -name "*.deb" -o -name "*.rpm" -o -name "*.AppImage" \
-                -o -name "*.exe" -o -name "*.msi" -o -name "*.dmg" \
-                -o -name "*.app" \
-            \) 2>/dev/null | while read -r f; do
-                local size
-                size=$(du -h "$f" | cut -f1)
-                echo -e "    ${GREEN}→${NC} $f ${DIM}(${size})${NC}"
-            done
-        fi
+        collect_and_clean "desktop"
     else
         echo ""
         error "El build falló. Revisa los errores arriba."
@@ -399,33 +774,9 @@ cmd_build_android() {
         info "Compilando en modo ${GREEN}release${NC}"
     fi
 
-    # Preguntar por firma (solo en release)
-    local sign_args=""
-    if [[ "$build_mode" != "2" ]]; then
-        echo ""
-        echo -e "  ${WHITE}¿Firmar el APK/AAB?${NC}"
-        echo -e "    ${WHITE}1${NC}) ${GREEN}No firmar${NC}     ${DIM}— Build sin firma (por defecto)${NC}"
-        echo -e "    ${WHITE}2${NC}) ${YELLOW}Firmar${NC}        ${DIM}— Requiere keystore configurado${NC}"
-        echo -ne "  ${YELLOW}▸${NC} Opción [1]: "
-        read -r sign_opt
-        if [[ "$sign_opt" == "2" ]]; then
-            echo -ne "  ${YELLOW}?${NC}  Ruta al keystore (.jks): "
-            read -r ks_path
-            if [[ -n "$ks_path" && -f "$ks_path" ]]; then
-                echo -ne "  ${YELLOW}?${NC}  Alias de la key: "
-                read -r ks_alias
-                echo -ne "  ${YELLOW}?${NC}  Password del keystore: "
-                read -rs ks_pass
-                echo ""
-                export TAURI_ANDROID_KEYSTORE_PATH="$ks_path"
-                export TAURI_ANDROID_KEYSTORE_ALIAS="${ks_alias:-key0}"
-                export TAURI_ANDROID_KEYSTORE_PASSWORD="$ks_pass"
-                export TAURI_ANDROID_KEY_PASSWORD="$ks_pass"
-                info "Keystore configurado para firma"
-            else
-                warn "Keystore no encontrado, compilando sin firma"
-            fi
-        fi
+    # Info sobre firma
+    if [[ "$build_mode" != "2" ]] && [[ -f "$KEYSTORE_FILE" ]]; then
+        info "Keystore detectado — el APK se firmará automáticamente"
     fi
 
     echo ""
@@ -475,32 +826,25 @@ cmd_build_android() {
 
     if $build_ok; then
         success "Build Android completado en ${GREEN}${elapsed}s${NC}"
-        echo ""
 
-        # Buscar artefactos Android
-        local android_out="$TAURI_DIR/gen/android/app/build/outputs"
-        info "Artefactos:"
-        if [[ -d "$android_out" ]]; then
-            find "$android_out" -type f \( -name "*.apk" -o -name "*.aab" \) 2>/dev/null | while read -r f; do
-                local size
-                size=$(du -h "$f" | cut -f1)
-                echo -e "    ${GREEN}→${NC} $f ${DIM}(${size})${NC}"
-            done
-        else
-            info "Busca los artefactos en: ${DIM}${android_out}${NC}"
-        fi
+        collect_and_clean "android"
 
         # Preguntar si instalar en dispositivo
         if [[ "$android_opt" == "1" || "$android_opt" == "3" ]]; then
-            echo ""
-            if command -v adb &>/dev/null && adb devices | grep -q "device$"; then
+            if command -v adb &>/dev/null && adb devices 2>/dev/null | grep -q "device$"; then
+                echo ""
                 if confirm "¿Instalar APK en el dispositivo conectado?"; then
+                    # Buscar el APK firmado primero, si no el unsigned
                     local apk_file
-                    apk_file=$(find "$android_out" -name "*.apk" -type f 2>/dev/null | head -1)
+                    apk_file=$(find "$BUILDS_DIR" -name "*-signed.apk" -type f -newer "$TAURI_DIR/tauri.conf.json" 2>/dev/null | sort | tail -1)
+                    [[ -z "$apk_file" ]] && apk_file=$(find "$BUILDS_DIR" -name "*.apk" -type f -newer "$TAURI_DIR/tauri.conf.json" 2>/dev/null | sort | tail -1)
                     if [[ -n "$apk_file" ]]; then
-                        step "Instalando..."
-                        adb install -r "$apk_file"
-                        success "APK instalado en el dispositivo"
+                        step "Instalando $(basename "$apk_file")..."
+                        if adb install -r "$apk_file" 2>/dev/null; then
+                            success "APK instalado en el dispositivo"
+                        else
+                            warn "No se pudo instalar. ¿Tiene depuración USB activada?"
+                        fi
                     else
                         warn "No se encontró el APK generado"
                     fi
@@ -515,6 +859,176 @@ cmd_build_android() {
         echo -e "    ${DIM}• SDK o NDK no instalados${NC}"
         echo -e "    ${DIM}• Java/JDK no encontrado${NC}"
         echo -e "    ${DIM}• Ejecuta ${CYAN}./klio.sh doctor${NC}${DIM} para diagnosticar${NC}"
+    fi
+
+    press_enter
+}
+
+# ══════════════════════════════════════════════════════════════
+# 2b. FIRMAR APK
+# ══════════════════════════════════════════════════════════════
+cmd_sign() {
+    echo ""
+    echo -e "  ${BOLD}${CYAN}🔏 Firmar APK Android${NC}"
+    separator
+    echo ""
+
+    # Buscar APKs sin firmar en builds/ y en el build de Android
+    local apk_search_dirs=(
+        "$TAURI_DIR/gen/android/app/build/outputs/apk"
+    )
+    # Agregar todas las carpetas de builds/ (más recientes primero)
+    if [[ -d "$BUILDS_DIR" ]]; then
+        while IFS= read -r d; do
+            apk_search_dirs+=("$d")
+        done < <(find "$BUILDS_DIR" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort -r)
+    fi
+
+    local unsigned_apks=()
+    for dir in "${apk_search_dirs[@]}"; do
+        if [[ -d "$dir" ]]; then
+            while IFS= read -r f; do
+                [[ -n "$f" ]] && unsigned_apks+=("$f")
+            done < <(find "$dir" -type f \( -name "*unsigned*.apk" -o -name "*release*.apk" \) 2>/dev/null | grep -v "\-signed" | grep -v "\-aligned" | sort)
+        fi
+    done
+
+    if [[ ${#unsigned_apks[@]} -eq 0 ]]; then
+        warn "No se encontraron APKs para firmar"
+        info "Primero haz un build Android: ${CYAN}./klio.sh android${NC}"
+        press_enter
+        return
+    fi
+
+    # Si hay varios, dejar elegir
+    local apk_to_sign=""
+    if [[ ${#unsigned_apks[@]} -eq 1 ]]; then
+        apk_to_sign="${unsigned_apks[0]}"
+        local apk_size
+        apk_size=$(du -h "$apk_to_sign" | cut -f1)
+        info "APK encontrado: ${WHITE}$(basename "$apk_to_sign")${NC} (${apk_size})"
+    else
+        info "Se encontraron ${WHITE}${#unsigned_apks[@]}${NC} APKs:"
+        echo ""
+        local i=1
+        for apk in "${unsigned_apks[@]}"; do
+            local apk_size
+            apk_size=$(du -h "$apk" | cut -f1)
+            echo -e "    ${WHITE}${i}${NC}) ${GREEN}$(basename "$apk")${NC} ${DIM}(${apk_size})${NC}"
+            ((i++))
+        done
+        echo ""
+        echo -ne "  ${YELLOW}▸${NC} ¿Cuál firmar? [1]: "
+        read -r apk_choice
+        [[ -z "$apk_choice" ]] && apk_choice=1
+        if [[ "$apk_choice" -ge 1 && "$apk_choice" -le ${#unsigned_apks[@]} ]] 2>/dev/null; then
+            apk_to_sign="${unsigned_apks[$((apk_choice-1))]}"
+        else
+            warn "Opción no válida"
+            press_enter
+            return
+        fi
+    fi
+
+    echo ""
+
+    # Buscar build-tools
+    local bt_dir
+    bt_dir=$(find_build_tools)
+    if [[ -z "$bt_dir" ]] || [[ ! -x "$bt_dir/zipalign" ]] || [[ ! -x "$bt_dir/apksigner" ]]; then
+        error "No se encontraron las build-tools de Android SDK"
+        info "Necesitas: ${CYAN}zipalign${NC} y ${CYAN}apksigner${NC}"
+        info "Instálalas desde Android Studio → SDK Manager → SDK Tools → Build-Tools"
+        press_enter
+        return
+    fi
+
+    # Asegurar keystore
+    if ! ensure_keystore; then
+        press_enter
+        return
+    fi
+
+    # Cargar config
+    if ! load_keystore_conf; then
+        error "No se pudo leer la configuración del keystore"
+        press_enter
+        return
+    fi
+
+    # Alinear
+    local apk_dir
+    apk_dir=$(dirname "$apk_to_sign")
+    local apk_base
+    apk_base=$(basename "$apk_to_sign" .apk)
+    # Limpiar nombre: quitar -unsigned si existe para no tener unsigned-signed
+    local clean_base="${apk_base/-unsigned/}"
+    local aligned_apk="${apk_dir}/${clean_base}-aligned.apk"
+    local signed_apk="${apk_dir}/${clean_base}-signed.apk"
+
+    step "Alineando APK..."
+    if ! "$bt_dir/zipalign" -f 4 "$apk_to_sign" "$aligned_apk" 2>/dev/null; then
+        error "Error al alinear el APK"
+        press_enter
+        return
+    fi
+    success "APK alineado"
+
+    # Firmar
+    step "Firmando APK..."
+    if "$bt_dir/apksigner" sign \
+        --ks "$KEYSTORE_FILE" \
+        --ks-key-alias "$KEY_ALIAS" \
+        --ks-pass "pass:${KEYSTORE_PASSWORD}" \
+        --key-pass "pass:${KEYSTORE_PASSWORD}" \
+        --out "$signed_apk" \
+        "$aligned_apk" 2>/dev/null; then
+
+        # Limpiar el alineado intermedio
+        rm -f "$aligned_apk"
+
+        # Verificar firma
+        if "$bt_dir/apksigner" verify "$signed_apk" 2>/dev/null; then
+            local signed_size
+            signed_size=$(du -h "$signed_apk" | cut -f1)
+            echo ""
+            success "APK firmado y verificado correctamente"
+            echo ""
+            info "Archivo: ${WHITE}${signed_apk}${NC} (${signed_size})"
+
+            # Ofrecer instalar via ADB
+            echo ""
+            if command -v adb &>/dev/null; then
+                local devices
+                devices=$(adb devices 2>/dev/null | grep -c "device$" || echo "0")
+                if [[ "$devices" -gt 0 ]]; then
+                    if confirm "¿Instalar en el dispositivo conectado via USB?"; then
+                        step "Instalando..."
+                        if adb install -r "$signed_apk" 2>/dev/null; then
+                            success "APK instalado en el dispositivo"
+                        else
+                            warn "No se pudo instalar. ¿Tiene depuración USB activada?"
+                        fi
+                    fi
+                fi
+            fi
+
+            echo ""
+            separator
+            echo ""
+            info "Para instalar manualmente en tu celular:"
+            echo -e "    ${DIM}1. Pasa el archivo ${WHITE}${final_name}${DIM} a tu celular${NC}"
+            echo -e "    ${DIM}   (por USB, Telegram, Google Drive, email, etc.)${NC}"
+            echo -e "    ${DIM}2. Abre el archivo .apk en el celular${NC}"
+            echo -e "    ${DIM}3. Acepta 'Instalar de fuentes desconocidas' si lo pide${NC}"
+            echo -e "    ${DIM}4. Toca Instalar${NC}"
+        else
+            error "La verificación de firma falló"
+        fi
+    else
+        rm -f "$aligned_apk"
+        error "Error al firmar el APK"
+        info "Revisa que el keystore sea válido"
     fi
 
     press_enter
@@ -540,7 +1054,7 @@ cmd_clean() {
     echo -e "    ${WHITE}2${NC}) ${YELLOW}dist/${NC}            ${DIM}— Build del frontend${NC}"
     echo -e "    ${WHITE}3${NC}) ${YELLOW}target/${NC}          ${DIM}— Build de Rust/Cargo${NC}"
     echo -e "    ${WHITE}4${NC}) ${YELLOW}Cache de Cargo${NC}   ${DIM}— ~/.cargo/registry cache${NC}"
-    echo -e "    ${WHITE}5${NC}) ${YELLOW}Android build${NC}    ${DIM}— Build de Gradle/Android${NC}"
+    echo -e "    ${WHITE}5${NC}) ${YELLOW}Android build${NC}    ${DIM}— Build de Gradle/Android (conserva APKs)${NC}"
     echo -e "    ${WHITE}6${NC}) ${RED}TODO${NC}             ${DIM}— node_modules + dist + target + android${NC}"
     echo -e "    ${WHITE}7${NC}) ${RED}NUCLEAR${NC}          ${DIM}— Todo + lock files (reinstalar desde cero)${NC}"
     echo -e "    ${WHITE}0${NC}) ${DIM}Volver${NC}"
@@ -593,19 +1107,33 @@ cmd_clean() {
             if [[ -d "$android_build" ]]; then
                 local size
                 size=$(du -sh "$android_build" 2>/dev/null | cut -f1)
-                if confirm "¿Eliminar build Android (${size})?"; then
+
+                # Contar APKs/AABs existentes
+                local apk_count=0
+                apk_count=$(find "$android_build/outputs" -type f \( -name "*.apk" -o -name "*.aab" \) 2>/dev/null | wc -l)
+
+                if [[ "$apk_count" -gt 0 ]]; then
+                    info "Se encontraron ${WHITE}${apk_count}${NC} archivo(s) APK/AAB"
+                    info "Se copiarán a ${CYAN}builds/android/${NC} antes de limpiar"
+                fi
+
+                if confirm "¿Limpiar build Android (${size})? Los APKs se conservan"; then
+                    # Salvar APKs/AABs
+                    if [[ "$apk_count" -gt 0 ]]; then
+                        mkdir -p "$BUILDS_DIR/android"
+                        find "$android_build/outputs" -type f \( -name "*.apk" -o -name "*.aab" \) 2>/dev/null | while read -r f; do
+                            local fname
+                            fname=$(basename "$f")
+                            cp "$f" "$BUILDS_DIR/android/$fname"
+                            success "Guardado: ${CYAN}builds/android/${fname}${NC}"
+                        done
+                    fi
                     rm -rf "$android_build"
-                    success "Build Android eliminado"
+                    [[ -d "$TAURI_DIR/gen/android/.gradle" ]] && rm -rf "$TAURI_DIR/gen/android/.gradle"
+                    success "Build Android eliminado (APKs conservados en builds/android/)"
                 fi
             else
                 info "No hay build Android para limpiar"
-                if [[ -d "$TAURI_DIR/gen/android" ]]; then
-                    info "Proyecto Android existe. ¿Quieres limpiar con Gradle?"
-                    if confirm "¿Ejecutar gradle clean?"; then
-                        cd "$TAURI_DIR/gen/android" && ./gradlew clean 2>/dev/null || true
-                        success "Gradle clean ejecutado"
-                    fi
-                fi
             fi
             ;;
         6)
@@ -1322,17 +1850,18 @@ main_menu() {
         echo ""
         echo -e "    ${WHITE} 1${NC}) ${GREEN}🚀 Desarrollo${NC}        ${DIM}— Tauri dev, Vite, PHP server${NC}"
         echo -e "    ${WHITE} 2${NC}) ${GREEN}📦 Build${NC}             ${DIM}— Compilar app (Desktop + Android)${NC}"
-        echo -e "    ${WHITE} 3${NC}) ${YELLOW}🧹 Limpiar${NC}           ${DIM}— Eliminar paquetes y caches${NC}"
-        echo -e "    ${WHITE} 4${NC}) ${CYAN}📋 Dependencias${NC}      ${DIM}— Instalar, actualizar, auditar${NC}"
-        echo -e "    ${WHITE} 5${NC}) ${MAGENTA}🎨 Iconos${NC}            ${DIM}— Generar iconos de la app${NC}"
-        echo -e "    ${WHITE} 6${NC}) ${CYAN}📊 Info${NC}              ${DIM}— Información del proyecto${NC}"
-        echo -e "    ${WHITE} 7${NC}) ${BLUE}🔀 Git${NC}               ${DIM}— Atajos de Git${NC}"
-        echo -e "    ${WHITE} 8${NC}) ${GREEN}🩺 Doctor${NC}            ${DIM}— Diagnosticar el entorno${NC}"
-        echo -e "    ${WHITE} 9${NC}) ${CYAN}📏 LOC${NC}               ${DIM}— Contar líneas de código${NC}"
-        echo -e "    ${WHITE}10${NC}) ${YELLOW}🏷️  Versión${NC}           ${DIM}— Bump de versión${NC}"
-        echo -e "    ${WHITE}11${NC}) ${MAGENTA}✨ Lint${NC}              ${DIM}— Verificar y formatear código${NC}"
-        echo -e "    ${WHITE}12${NC}) ${BLUE}🔍 Logs${NC}              ${DIM}— Debug y logs detallados${NC}"
-        echo -e "    ${WHITE}13${NC}) ${GREEN}💾 Backup${NC}            ${DIM}— Crear respaldo del proyecto${NC}"
+        echo -e "    ${WHITE} 3${NC}) ${GREEN}🔏 Firmar APK${NC}        ${DIM}— Firmar APK para instalar en celular${NC}"
+        echo -e "    ${WHITE} 4${NC}) ${YELLOW}🧹 Limpiar${NC}           ${DIM}— Eliminar paquetes y caches${NC}"
+        echo -e "    ${WHITE} 5${NC}) ${CYAN}📋 Dependencias${NC}      ${DIM}— Instalar, actualizar, auditar${NC}"
+        echo -e "    ${WHITE} 6${NC}) ${MAGENTA}🎨 Iconos${NC}            ${DIM}— Generar iconos de la app${NC}"
+        echo -e "    ${WHITE} 7${NC}) ${CYAN}📊 Info${NC}              ${DIM}— Información del proyecto${NC}"
+        echo -e "    ${WHITE} 8${NC}) ${BLUE}🔀 Git${NC}               ${DIM}— Atajos de Git${NC}"
+        echo -e "    ${WHITE} 9${NC}) ${GREEN}🩺 Doctor${NC}            ${DIM}— Diagnosticar el entorno${NC}"
+        echo -e "    ${WHITE}10${NC}) ${CYAN}📏 LOC${NC}               ${DIM}— Contar líneas de código${NC}"
+        echo -e "    ${WHITE}11${NC}) ${YELLOW}🏷️  Versión${NC}           ${DIM}— Bump de versión${NC}"
+        echo -e "    ${WHITE}12${NC}) ${MAGENTA}✨ Lint${NC}              ${DIM}— Verificar y formatear código${NC}"
+        echo -e "    ${WHITE}13${NC}) ${BLUE}🔍 Logs${NC}              ${DIM}— Debug y logs detallados${NC}"
+        echo -e "    ${WHITE}14${NC}) ${GREEN}💾 Backup${NC}            ${DIM}— Crear respaldo del proyecto${NC}"
         echo ""
         echo -e "    ${WHITE} 0${NC}) ${RED}Salir${NC}"
         echo ""
@@ -1342,17 +1871,18 @@ main_menu() {
         case $choice in
             1)  cmd_dev ;;
             2)  cmd_build ;;
-            3)  cmd_clean ;;
-            4)  cmd_deps ;;
-            5)  cmd_icons ;;
-            6)  cmd_info ;;
-            7)  cmd_git ;;
-            8)  cmd_doctor ;;
-            9)  cmd_loc ;;
-            10) cmd_version ;;
-            11) cmd_lint ;;
-            12) cmd_logs ;;
-            13) cmd_backup ;;
+            3)  cmd_sign ;;
+            4)  cmd_clean ;;
+            5)  cmd_deps ;;
+            6)  cmd_icons ;;
+            7)  cmd_info ;;
+            8)  cmd_git ;;
+            9)  cmd_doctor ;;
+            10) cmd_loc ;;
+            11) cmd_version ;;
+            12) cmd_lint ;;
+            13) cmd_logs ;;
+            14) cmd_backup ;;
             0|q|Q)
                 echo ""
                 echo -e "  ${DIM}¡Hasta luego! 📖${NC}"
@@ -1376,6 +1906,7 @@ if [[ $# -gt 0 ]]; then
         dev)      cmd_dev ;;
         build)    cmd_build ;;
         android)  cmd_build_android ;;
+        sign)     cmd_sign ;;
         clean)    cmd_clean ;;
         deps)     cmd_deps ;;
         icons)    cmd_icons ;;
@@ -1395,6 +1926,7 @@ if [[ $# -gt 0 ]]; then
             echo -e "    dev       Opciones de desarrollo (Desktop + Android)"
             echo -e "    build     Compilar la aplicación (Desktop + Android)"
             echo -e "    android   Build Android directo (APK/AAB)"
+            echo -e "    sign      Firmar APK para instalar en celular"
             echo -e "    clean     Limpiar paquetes y caches"
             echo -e "    deps      Gestionar dependencias (+ Android init)"
             echo -e "    icons     Generar iconos"

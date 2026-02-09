@@ -35,6 +35,12 @@ Thumbs.db
 # Claude
 .claude/
 
+# Keystore (firma Android)
+.keystore/
+
+# Builds finales
+builds/
+
 # Env
 .env
 .env.*

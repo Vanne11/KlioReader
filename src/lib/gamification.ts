@@ -3,8 +3,6 @@ export interface UserStats {
   level: number;
   streak: number;
   lastReadDate: string | null;
-  totalBooksRead: number;
-  totalMinutesRead: number;
 }
 
 export const INITIAL_STATS: UserStats = {
@@ -12,8 +10,6 @@ export const INITIAL_STATS: UserStats = {
   level: 1,
   streak: 0,
   lastReadDate: null,
-  totalBooksRead: 0,
-  totalMinutesRead: 0,
 };
 
 export function calculateLevel(xp: number): number {
@@ -53,4 +49,24 @@ export function addXP(stats: UserStats, amount: number): UserStats {
   const newXP = stats.xp + amount;
   const newLevel = calculateLevel(newXP);
   return { ...stats, xp: newXP, level: newLevel };
+}
+
+/** Convert local UserStats to API format (snake_case) */
+export function statsToApi(stats: UserStats): { xp: number; level: number; streak: number; last_streak_date: string | null } {
+  return {
+    xp: stats.xp,
+    level: stats.level,
+    streak: stats.streak,
+    last_streak_date: stats.lastReadDate,
+  };
+}
+
+/** Convert API UserStats (snake_case) to local format (camelCase) */
+export function statsFromApi(apiStats: { xp: number; level: number; streak: number; last_streak_date: string | null }): UserStats {
+  return {
+    xp: apiStats.xp,
+    level: calculateLevel(apiStats.xp),
+    streak: apiStats.streak,
+    lastReadDate: apiStats.last_streak_date,
+  };
 }

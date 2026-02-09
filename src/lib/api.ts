@@ -321,7 +321,7 @@ export async function getBookmarks(bookId: number): Promise<Bookmark[]> {
 
 export async function addBookmark(
   bookId: number,
-  data: { chapter_index: number; page_index?: number; label?: string }
+  data: { chapter_index: number; page_index: number; label?: string }
 ): Promise<{ id: number }> {
   return request(`/api/books/${bookId}/bookmarks`, {
     method: "POST",

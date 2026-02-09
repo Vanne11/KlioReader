@@ -7,7 +7,8 @@ import {
   Scroll as ScrollIcon, Columns2, Square, Maximize, Minimize,
   LayoutGrid, Grid2X2, List, Settings2,
   Cloud, CloudUpload, CloudDownload, LogIn, LogOut, User, Loader2, Server, Trash2, Pencil,
-  Play, ChevronLeft, AlertTriangle, CheckCircle2, Info
+  Play, ChevronLeft, AlertTriangle, CheckCircle2, Info,
+  StickyNote, BookmarkPlus, Bookmark as BookmarkIcon, Plus, MessageSquare
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -19,10 +20,16 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Document, Page, pdfjs } from 'react-pdf';
 import parse, { Element, HTMLReactParserOptions } from 'html-react-parser';
-import { UserStats, INITIAL_STATS, addXP, updateStreak } from "@/lib/gamification";
+import { UserStats, INITIAL_STATS, addXP, updateStreak, statsToApi, statsFromApi } from "@/lib/gamification";
 import * as api from "@/lib/api";
 
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+
+/** Converts a cover value to a valid image src, handling both raw base64 and full data URIs */
+function coverSrc(cover: string | null | undefined): string | undefined {
+  if (!cover) return undefined;
+  return cover.startsWith('data:') ? cover : `data:image/png;base64,${cover}`;
+}
 
 import "./App.css";
 
@@ -98,6 +105,16 @@ function App() {
   const [alertModal, setAlertModal] = useState<{ title: string; message: string; type: 'error' | 'success' | 'info' } | null>(null);
   const [uploadingBookId, setUploadingBookId] = useState<string | null>(null);
   const [downloadingBookId, setDownloadingBookId] = useState<number | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
+  const [profile, setProfile] = useState<api.UserProfile | null>(null);
+  const [profileForm, setProfileForm] = useState({ username: '', email: '', password: '' });
+  // Notes & Bookmarks in reader
+  const [readerNotes, setReaderNotes] = useState<api.Note[]>([]);
+  const [readerBookmarks, setReaderBookmarks] = useState<api.Bookmark[]>([]);
+  const [showNotesPanel, setShowNotesPanel] = useState(false);
+  const [newNoteContent, setNewNoteContent] = useState('');
+  const [newNoteColor, setNewNoteColor] = useState('#ffeb3b');
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [numPages, setNumPages] = useState<number | null>(null);
@@ -176,7 +193,13 @@ function App() {
   useEffect(() => { localStorage.setItem("readView", readView); }, [readView]);
   useEffect(() => { localStorage.setItem("readerPageColumns", pageColumns.toString()); }, [pageColumns]);
   useEffect(() => { localStorage.setItem("readerFont", readerFont); }, [readerFont]);
-  useEffect(() => { localStorage.setItem("userStats", JSON.stringify(stats)); }, [stats]);
+  useEffect(() => {
+    localStorage.setItem("userStats", JSON.stringify(stats));
+    // Sync stats to cloud when logged in
+    if (api.isLoggedIn()) {
+      api.syncStats(statsToApi(stats)).catch(() => {});
+    }
+  }, [stats]);
 
   useEffect(() => {
     async function init() {
@@ -302,8 +325,16 @@ function App() {
     if (!api.isLoggedIn()) return;
     setCloudLoading(true);
     try {
-      const books = await api.listBooks();
+      const [books, cloudStats] = await Promise.all([
+        api.listBooks(),
+        api.getStats().catch(() => null),
+      ]);
       setCloudBooks(books);
+      // Merge cloud stats: use whichever has more XP (conflict resolution)
+      if (cloudStats) {
+        const remote = statsFromApi(cloudStats);
+        setStats(prev => remote.xp >= prev.xp ? remote : prev);
+      }
     } catch (err: any) {
       showAlert('error', 'Error al cargar libros', err.message || 'No se pudieron cargar los libros de la nube');
     } finally {
@@ -404,6 +435,141 @@ function App() {
     setEditingLocalBook(null);
   }
 
+  // ── Profile ──
+  async function loadProfile() {
+    try {
+      const p = await api.getProfile();
+      setProfile(p);
+      setProfileForm({ username: p.username, email: p.email, password: '' });
+      setShowProfile(true);
+    } catch (err: any) {
+      showAlert('error', 'Error', err.message || 'No se pudo cargar el perfil');
+    }
+  }
+
+  async function saveProfile() {
+    const data: Record<string, string> = {};
+    if (profileForm.username && profileForm.username !== profile?.username) data.username = profileForm.username;
+    if (profileForm.email && profileForm.email !== profile?.email) data.email = profileForm.email;
+    if (profileForm.password) data.password = profileForm.password;
+    if (Object.keys(data).length === 0) { setShowProfile(false); return; }
+    try {
+      await api.updateProfile(data);
+      if (data.username || data.email) {
+        const updated = { ...authUser!, ...data };
+        setAuthUser(updated);
+        localStorage.setItem("authUser", JSON.stringify(updated));
+      }
+      setShowProfile(false);
+      showAlert('success', 'Perfil actualizado', 'Tu perfil se actualizó correctamente');
+    } catch (err: any) {
+      showAlert('error', 'Error', err.message || 'No se pudo actualizar el perfil');
+    }
+  }
+
+  async function handleDeleteAccount() {
+    try {
+      await api.deleteAccount();
+      api.clearAuth();
+      setAuthUser(null);
+      setCloudBooks([]);
+      setShowDeleteConfirm(false);
+      showAlert('success', 'Cuenta eliminada', 'Tu cuenta y todos tus datos fueron eliminados permanentemente');
+    } catch (err: any) {
+      showAlert('error', 'Error', err.message || 'No se pudo eliminar la cuenta');
+    }
+  }
+
+  // ── Notes & Bookmarks (cloud books in reader) ──
+  function getCloudBookForCurrent(): api.CloudBook | undefined {
+    if (!currentBook) return undefined;
+    return cloudBooks.find(cb =>
+      cb.title.toLowerCase() === currentBook.title.toLowerCase() &&
+      cb.author.toLowerCase() === currentBook.author.toLowerCase()
+    );
+  }
+
+  async function loadReaderNotesAndBookmarks() {
+    if (!api.isLoggedIn()) return;
+    const cloud = getCloudBookForCurrent();
+    if (!cloud) return;
+    try {
+      const [notes, bookmarks] = await Promise.all([
+        api.getNotes(cloud.id),
+        api.getBookmarks(cloud.id),
+      ]);
+      setReaderNotes(notes);
+      setReaderBookmarks(bookmarks);
+    } catch { /* silent */ }
+  }
+
+  async function addReaderNote() {
+    if (!currentBook || !newNoteContent.trim()) return;
+    const cloud = getCloudBookForCurrent();
+    if (!cloud) { showAlert('info', 'Sin conexión', 'Sube este libro a la nube para guardar notas'); return; }
+    try {
+      const { id } = await api.addNote(cloud.id, {
+        chapter_index: currentBook.currentChapter,
+        content: newNoteContent.trim(),
+        color: newNoteColor,
+      });
+      setReaderNotes(prev => [...prev, {
+        id, book_id: cloud.id, chapter_index: currentBook.currentChapter,
+        content: newNoteContent.trim(), highlight_text: null, color: newNoteColor,
+        created_at: new Date().toISOString(),
+      }]);
+      setNewNoteContent('');
+    } catch (err: any) {
+      showAlert('error', 'Error', err.message || 'No se pudo guardar la nota');
+    }
+  }
+
+  async function deleteReaderNote(noteId: number) {
+    try {
+      await api.deleteNote(noteId);
+      setReaderNotes(prev => prev.filter(n => n.id !== noteId));
+    } catch (err: any) {
+      showAlert('error', 'Error', err.message || 'No se pudo eliminar la nota');
+    }
+  }
+
+  async function addReaderBookmark() {
+    if (!currentBook) return;
+    const cloud = getCloudBookForCurrent();
+    if (!cloud) { showAlert('info', 'Sin conexión', 'Sube este libro a la nube para guardar marcadores'); return; }
+    // Check if already bookmarked
+    const exists = readerBookmarks.find(b =>
+      b.chapter_index === currentBook.currentChapter && b.page_index === currentPageInChapter
+    );
+    if (exists) {
+      await deleteReaderBookmark(exists.id);
+      return;
+    }
+    try {
+      const label = `Cap. ${currentBook.currentChapter + 1}` + (readView === 'paginated' ? `, Pág. ${currentPageInChapter + 1}` : '');
+      const { id } = await api.addBookmark(cloud.id, {
+        chapter_index: currentBook.currentChapter,
+        page_index: currentPageInChapter,
+        label,
+      });
+      setReaderBookmarks(prev => [...prev, {
+        id, book_id: cloud.id, chapter_index: currentBook.currentChapter,
+        page_index: currentPageInChapter, label, created_at: new Date().toISOString(),
+      }]);
+    } catch (err: any) {
+      showAlert('error', 'Error', err.message || 'No se pudo guardar el marcador');
+    }
+  }
+
+  async function deleteReaderBookmark(bookmarkId: number) {
+    try {
+      await api.deleteBookmark(bookmarkId);
+      setReaderBookmarks(prev => prev.filter(b => b.id !== bookmarkId));
+    } catch (err: any) {
+      showAlert('error', 'Error', err.message || 'No se pudo eliminar el marcador');
+    }
+  }
+
   useEffect(() => {
     if (authUser) loadCloudBooks();
   }, [authUser]);
@@ -412,9 +578,17 @@ function App() {
     setSelectedBook(null);
     setCurrentBook(book);
     setCurrentPageInChapter(0);
+    setShowNotesPanel(false);
+    setReaderNotes([]);
+    setReaderBookmarks([]);
     setStats(prev => updateStreak(prev));
     if (book.type === 'epub') loadEpubChapter(book.path, book.currentChapter);
   }
+
+  // Load notes/bookmarks after currentBook is set
+  useEffect(() => {
+    if (currentBook && api.isLoggedIn()) loadReaderNotesAndBookmarks();
+  }, [currentBook?.title]);
 
   async function loadEpubChapter(path: string, index: number) {
     try {
@@ -458,6 +632,21 @@ function App() {
     setCurrentBook(updated);
     setBooks(prev => prev.map(b => b.id === updated.id ? updated : b));
     if (delta > 0) setStats(prev => addXP(prev, 10));
+
+    // Sync progress to cloud if logged in
+    if (api.isLoggedIn()) {
+      const cloudMatch = cloudBooks.find(cb =>
+        cb.title.toLowerCase() === currentBook.title.toLowerCase() &&
+        cb.author.toLowerCase() === currentBook.author.toLowerCase()
+      );
+      if (cloudMatch) {
+        api.syncProgress(cloudMatch.id, {
+          current_chapter: newIndex,
+          current_page: newIndex,
+          progress_percent: newProgress,
+        }).catch(() => {});
+      }
+    }
   }
 
   const themeClasses = {
@@ -528,6 +717,16 @@ function App() {
                   </div>
                 </DialogContent>
               </Dialog>
+              {api.isLoggedIn() && (
+                <>
+                  <Tooltip><TooltipTrigger asChild>
+                    <Button variant="ghost" size="icon" className={`h-9 w-9 rounded-full ${showNotesPanel ? 'bg-primary/30 text-primary' : 'bg-black/20'}`} onClick={() => setShowNotesPanel(p => !p)}><StickyNote className="w-5 h-5" /></Button>
+                  </TooltipTrigger><TooltipContent>Notas</TooltipContent></Tooltip>
+                  <Tooltip><TooltipTrigger asChild>
+                    <Button variant="ghost" size="icon" className={`h-9 w-9 rounded-full ${readerBookmarks.some(b => b.chapter_index === currentBook.currentChapter && b.page_index === currentPageInChapter) ? 'bg-amber-500/30 text-amber-400' : 'bg-black/20'}`} onClick={addReaderBookmark}><BookmarkIcon className="w-5 h-5" /></Button>
+                  </TooltipTrigger><TooltipContent>Marcar página</TooltipContent></Tooltip>
+                </>
+              )}
               <Separator orientation="vertical" className="h-6 opacity-10 mx-2" />
               <div className="flex items-center gap-2">
                 <Button variant="ghost" size="sm" onClick={() => changePage(-1)} disabled={currentBook.currentChapter === 0 && currentPageInChapter === 0}>Anterior</Button>
@@ -543,46 +742,131 @@ function App() {
             </div>
           </header>
 
-          <div ref={readerRef} className={`flex-1 ${readView === 'paginated' ? 'overflow-hidden' : 'overflow-y-auto overflow-x-hidden no-scrollbar'}`}>
-            {readView === 'paginated' && currentBook.type === 'epub' ? (
-              <div className="h-full py-12 px-12">
-                <div className="overflow-hidden" style={{ height: pageHeight > 0 ? `${pageHeight}px` : '100%' }}>
-                  <div
-                    ref={contentRef}
-                    key={currentBook.id + '-' + currentBook.currentChapter + '-' + fontSize}
-                    className="mx-auto max-w-2xl font-serif selection:bg-primary/30 break-words"
-                    style={{
-                      fontSize: `${fontSize}px`,
-                      lineHeight: '1.8',
-                      fontFamily: readerFont,
-                      transform: `translateY(-${currentPageInChapter * pageHeight}px)`,
-                      transition: 'transform 0.3s ease',
-                    }}
-                  >
-                    <div className="epub-reader-content">{parse(epubContent, parserOptions)}</div>
+          <div className="flex-1 flex overflow-hidden">
+            <div ref={readerRef} className={`flex-1 ${readView === 'paginated' ? 'overflow-hidden' : 'overflow-y-auto overflow-x-hidden no-scrollbar'}`}>
+              {readView === 'paginated' && currentBook.type === 'epub' ? (
+                <div className="h-full py-12 px-12">
+                  <div className="overflow-hidden" style={{ height: pageHeight > 0 ? `${pageHeight}px` : '100%' }}>
+                    <div
+                      ref={contentRef}
+                      key={currentBook.id + '-' + currentBook.currentChapter + '-' + fontSize}
+                      className="mx-auto max-w-2xl font-serif selection:bg-primary/30 break-words"
+                      style={{
+                        fontSize: `${fontSize}px`,
+                        lineHeight: '1.8',
+                        fontFamily: readerFont,
+                        transform: `translateY(-${currentPageInChapter * pageHeight}px)`,
+                        transition: 'transform 0.3s ease',
+                      }}
+                    >
+                      <div className="epub-reader-content">{parse(epubContent, parserOptions)}</div>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ) : (
-              <div
-                key={currentBook.id + '-' + currentBook.currentChapter + '-' + readView + '-' + fontSize}
-                className="mx-auto py-12 px-12 font-serif selection:bg-primary/30 break-words max-w-2xl"
-                style={{
-                  fontSize: `${fontSize}px`,
-                  lineHeight: '1.8',
-                  fontFamily: readerFont,
-                }}
-              >
-                {currentBook.type === 'epub' ? (
-                  <div className="epub-reader-content">{parse(epubContent, parserOptions)}</div>
-                ) : (
-                  <div className="flex justify-center">
-                    <Document file={convertFileSrc(currentBook.path)} onLoadSuccess={({ numPages }) => setNumPages(numPages)}>
-                      <Page pageNumber={currentBook.currentChapter + 1} scale={scale} renderAnnotationLayer={false} renderTextLayer={true} className="shadow-2xl" />
-                    </Document>
+              ) : (
+                <div
+                  key={currentBook.id + '-' + currentBook.currentChapter + '-' + readView + '-' + fontSize}
+                  className="mx-auto py-12 px-12 font-serif selection:bg-primary/30 break-words max-w-2xl"
+                  style={{
+                    fontSize: `${fontSize}px`,
+                    lineHeight: '1.8',
+                    fontFamily: readerFont,
+                  }}
+                >
+                  {currentBook.type === 'epub' ? (
+                    <div className="epub-reader-content">{parse(epubContent, parserOptions)}</div>
+                  ) : (
+                    <div className="flex justify-center">
+                      <Document file={convertFileSrc(currentBook.path)} onLoadSuccess={({ numPages }) => setNumPages(numPages)}>
+                        <Page pageNumber={currentBook.currentChapter + 1} scale={scale} renderAnnotationLayer={false} renderTextLayer={true} className="shadow-2xl" />
+                      </Document>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Notes & Bookmarks Side Panel */}
+            {showNotesPanel && (
+              <aside className="w-80 border-l border-white/10 bg-[#16161e]/90 backdrop-blur-md flex flex-col overflow-hidden">
+                <div className="p-4 border-b border-white/10 flex items-center justify-between">
+                  <h3 className="text-sm font-bold flex items-center gap-2"><MessageSquare className="w-4 h-4 text-primary" /> Notas y Marcadores</h3>
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setShowNotesPanel(false)}><X className="w-4 h-4" /></Button>
+                </div>
+
+                {/* Add note */}
+                <div className="p-4 border-b border-white/10 space-y-2">
+                  <textarea
+                    value={newNoteContent}
+                    onChange={e => setNewNoteContent(e.target.value)}
+                    placeholder="Escribe una nota para este capítulo..."
+                    rows={3}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs focus:border-primary outline-none resize-none"
+                  />
+                  <div className="flex items-center justify-between">
+                    <div className="flex gap-1">
+                      {['#ffeb3b', '#ef5350', '#42a5f5', '#66bb6a', '#ab47bc'].map(c => (
+                        <button key={c} className={`w-5 h-5 rounded-full border-2 ${newNoteColor === c ? 'border-white' : 'border-transparent'}`} style={{ backgroundColor: c }} onClick={() => setNewNoteColor(c)} />
+                      ))}
+                    </div>
+                    <Button size="sm" className="text-xs h-7" disabled={!newNoteContent.trim()} onClick={addReaderNote}><Plus className="w-3 h-3 mr-1" /> Nota</Button>
                   </div>
-                )}
-              </div>
+                </div>
+
+                {/* List */}
+                <ScrollArea className="flex-1">
+                  <div className="p-4 space-y-3">
+                    {/* Bookmarks for this chapter */}
+                    {readerBookmarks.filter(b => b.chapter_index === currentBook.currentChapter).length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-[10px] font-bold uppercase opacity-40 tracking-widest">Marcadores</p>
+                        {readerBookmarks.filter(b => b.chapter_index === currentBook.currentChapter).map(bm => (
+                          <div key={bm.id} className="flex items-center gap-2 bg-amber-500/10 rounded-lg px-3 py-2 group">
+                            <BookmarkIcon className="w-3 h-3 text-amber-400 shrink-0" />
+                            <span className="text-xs flex-1 truncate">{bm.label}</span>
+                            <Button variant="ghost" size="icon" className="h-5 w-5 opacity-0 group-hover:opacity-100" onClick={() => deleteReaderBookmark(bm.id)}><X className="w-3 h-3" /></Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Notes for this chapter */}
+                    {readerNotes.filter(n => n.chapter_index === currentBook.currentChapter).length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-[10px] font-bold uppercase opacity-40 tracking-widest">Notas</p>
+                        {readerNotes.filter(n => n.chapter_index === currentBook.currentChapter).map(note => (
+                          <div key={note.id} className="rounded-lg px-3 py-2 group relative" style={{ backgroundColor: note.color + '15', borderLeft: `3px solid ${note.color}` }}>
+                            {note.highlight_text && <p className="text-[10px] italic opacity-50 mb-1">"{note.highlight_text}"</p>}
+                            <p className="text-xs">{note.content}</p>
+                            <Button variant="ghost" size="icon" className="absolute top-1 right-1 h-5 w-5 opacity-0 group-hover:opacity-100" onClick={() => deleteReaderNote(note.id)}><X className="w-3 h-3" /></Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* All bookmarks from other chapters */}
+                    {readerBookmarks.filter(b => b.chapter_index !== currentBook.currentChapter).length > 0 && (
+                      <div className="space-y-2 pt-2 border-t border-white/5">
+                        <p className="text-[10px] font-bold uppercase opacity-40 tracking-widest">Otros capítulos</p>
+                        {readerBookmarks.filter(b => b.chapter_index !== currentBook.currentChapter).map(bm => (
+                          <div key={bm.id} className="flex items-center gap-2 bg-white/5 rounded-lg px-3 py-2 group opacity-60">
+                            <BookmarkIcon className="w-3 h-3 text-amber-400 shrink-0" />
+                            <span className="text-xs flex-1 truncate">{bm.label}</span>
+                            <Button variant="ghost" size="icon" className="h-5 w-5 opacity-0 group-hover:opacity-100" onClick={() => deleteReaderBookmark(bm.id)}><X className="w-3 h-3" /></Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {readerNotes.length === 0 && readerBookmarks.length === 0 && (
+                      <div className="text-center py-8 opacity-30">
+                        <StickyNote className="w-8 h-8 mx-auto mb-2" />
+                        <p className="text-xs">Sin notas ni marcadores</p>
+                      </div>
+                    )}
+                  </div>
+                </ScrollArea>
+              </aside>
             )}
           </div>
         </div>
@@ -596,7 +880,7 @@ function App() {
           <div className="absolute inset-0 opacity-20 pointer-events-none overflow-hidden">
              {selectedBook.cover && (
                <img 
-                 src={`data:image/png;base64,${selectedBook.cover}`} 
+                 src={coverSrc(selectedBook.cover)}
                  className="w-full h-full object-cover blur-[100px] scale-150" 
                  alt="" 
                />
@@ -633,7 +917,7 @@ function App() {
                     <div className="absolute -inset-4 bg-primary/20 rounded-[2rem] blur-2xl opacity-0 group-hover:opacity-100 transition-duration-700" />
                     <div className="relative aspect-[3/4.5] rounded-2xl overflow-hidden shadow-[0_30px_60px_-15px_rgba(0,0,0,0.8)] border border-white/10 bg-black/40">
                       {selectedBook.cover ? (
-                        <img src={`data:image/png;base64,${selectedBook.cover}`} className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105" alt={selectedBook.title} />
+                        <img src={coverSrc(selectedBook.cover)} className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105" alt={selectedBook.title} />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center opacity-10">
                           <BookOpen className="w-32 h-32" />
@@ -721,7 +1005,7 @@ function App() {
           <div className="p-6 mt-auto border-t border-white/5">
             {authUser ? (
               <div className="space-y-2">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 cursor-pointer hover:opacity-80" onClick={loadProfile}>
                   <User className="w-4 h-4 text-primary" />
                   <span className="text-xs font-bold truncate">{authUser.username}</span>
                 </div>
@@ -767,15 +1051,15 @@ function App() {
                             <div className="aspect-[2/3] relative overflow-hidden bg-black/60 flex items-center justify-center">
                               {book.cover ? (
                                 <>
-                                  <img 
-                                    src={`data:image/png;base64,${book.cover}`} 
-                                    className="absolute inset-0 w-full h-full object-cover blur-2xl opacity-40 scale-110" 
-                                    alt="" 
+                                  <img
+                                    src={coverSrc(book.cover)}
+                                    className="absolute inset-0 w-full h-full object-cover blur-2xl opacity-40 scale-110"
+                                    alt=""
                                   />
-                                  <img 
-                                    src={`data:image/png;base64,${book.cover}`} 
-                                    className="relative z-10 w-full h-full object-contain shadow-2xl transition-transform duration-700 group-hover:scale-105" 
-                                    alt="" 
+                                  <img
+                                    src={coverSrc(book.cover)}
+                                    className="relative z-10 w-full h-full object-contain shadow-2xl transition-transform duration-700 group-hover:scale-105"
+                                    alt=""
                                   />
                                 </>
                               ) : (
@@ -798,8 +1082,8 @@ function App() {
                           <div className="w-24 aspect-[2/3] relative rounded-lg overflow-hidden ring-1 ring-white/10 hover:ring-primary transition-all shadow-xl bg-black/60 group flex items-center justify-center">
                             {book.cover ? (
                               <>
-                                <img src={`data:image/png;base64,${book.cover}`} className="absolute inset-0 w-full h-full object-cover blur-lg opacity-40 scale-125" alt="" />
-                                <img src={`data:image/png;base64,${book.cover}`} className="relative z-10 w-full h-full object-contain group-hover:scale-110 transition-transform duration-500" alt="" />
+                                <img src={coverSrc(book.cover)} className="absolute inset-0 w-full h-full object-cover blur-lg opacity-40 scale-125" alt="" />
+                                <img src={coverSrc(book.cover)} className="relative z-10 w-full h-full object-contain group-hover:scale-110 transition-transform duration-500" alt="" />
                               </>
                             ) : (
                               <div className="w-full h-full flex items-center justify-center opacity-10">
@@ -816,8 +1100,8 @@ function App() {
                             <div className="aspect-[2/3] relative rounded-lg overflow-hidden shadow-lg border border-white/5 bg-black/60 flex items-center justify-center">
                               {book.cover ? (
                                 <>
-                                  <img src={`data:image/png;base64,${book.cover}`} className="absolute inset-0 w-full h-full object-cover blur-lg opacity-40 scale-125" alt="" />
-                                  <img src={`data:image/png;base64,${book.cover}`} className="relative z-10 w-full h-full object-contain group-hover:scale-105 transition-transform duration-500" alt="" />
+                                  <img src={coverSrc(book.cover)} className="absolute inset-0 w-full h-full object-cover blur-lg opacity-40 scale-125" alt="" />
+                                  <img src={coverSrc(book.cover)} className="relative z-10 w-full h-full object-contain group-hover:scale-105 transition-transform duration-500" alt="" />
                                 </>
                               ) : (
                                 <div className="w-full h-full bg-white/5 flex items-center justify-center opacity-5">
@@ -836,8 +1120,8 @@ function App() {
                             <div className="w-16 aspect-[2/3] rounded-md bg-[#0f0f14] overflow-hidden shrink-0 border border-white/10 flex items-center justify-center shadow-lg relative">
                               {book.cover ? (
                                 <>
-                                  <img src={`data:image/png;base64,${book.cover}`} className="absolute inset-0 w-full h-full object-cover blur-md opacity-40 scale-125" alt="" />
-                                  <img src={`data:image/png;base64,${book.cover}`} className="relative z-10 w-full h-full object-contain group-hover:scale-110 transition-transform duration-500" alt="" />
+                                  <img src={coverSrc(book.cover)} className="absolute inset-0 w-full h-full object-cover blur-md opacity-40 scale-125" alt="" />
+                                  <img src={coverSrc(book.cover)} className="relative z-10 w-full h-full object-contain group-hover:scale-110 transition-transform duration-500" alt="" />
                                 </>
                               ) : (
                                 <BookOpen className="w-6 h-6 opacity-10" />
@@ -958,7 +1242,7 @@ function App() {
                         {cloudBooks.map(cb => (
                           <Card key={cb.id} className="flex bg-white/5 border-white/5 p-4 gap-4 items-center">
                             <div className="w-12 aspect-[2/3] rounded bg-[#0f0f14] overflow-hidden shrink-0 border border-white/10 flex items-center justify-center">
-                              {cb.cover_base64 ? <img src={`data:image/png;base64,${cb.cover_base64}`} className="w-full h-full object-contain" alt="" /> : <BookOpen className="w-4 h-4 opacity-10" />}
+                              {cb.cover_base64 ? <img src={coverSrc(cb.cover_base64)} className="w-full h-full object-contain" alt="" /> : <BookOpen className="w-4 h-4 opacity-10" />}
                             </div>
                             <div className="flex-1 min-w-0">
                               <h3 className="text-sm font-bold truncate">{cb.title}</h3>
@@ -1009,6 +1293,70 @@ function App() {
                       <div className="flex gap-2 pt-2">
                         <Button variant="outline" className="flex-1 border-white/10" onClick={() => setEditingCloudBook(null)}>Cancelar</Button>
                         <Button className="flex-1 font-bold" onClick={saveCloudBookEdit}>Guardar</Button>
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+
+                {/* Profile Dialog */}
+                <Dialog open={showProfile} onOpenChange={setShowProfile}>
+                  <DialogContent className="sm:max-w-[425px] bg-[#16161e] border-white/10 text-white">
+                    <DialogHeader><DialogTitle>Mi Perfil</DialogTitle></DialogHeader>
+                    <div className="space-y-4 py-4">
+                      {profile && (
+                        <div className="flex items-center gap-4 pb-4 border-b border-white/10">
+                          <div className="w-14 h-14 rounded-full bg-primary/20 flex items-center justify-center">
+                            <User className="w-7 h-7 text-primary" />
+                          </div>
+                          <div>
+                            <p className="font-bold">{profile.username}</p>
+                            <p className="text-xs opacity-50">{profile.email}</p>
+                            <div className="flex gap-3 mt-1 text-[10px] opacity-40">
+                              <span>{profile.total_books} libros</span>
+                              <span>{profile.total_notes} notas</span>
+                              <span>{profile.total_bookmarks} marcadores</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase opacity-50 tracking-widest">Usuario</label>
+                        <input value={profileForm.username} onChange={e => setProfileForm(f => ({ ...f, username: e.target.value }))} className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-sm focus:border-primary outline-none" />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase opacity-50 tracking-widest">Email</label>
+                        <input value={profileForm.email} onChange={e => setProfileForm(f => ({ ...f, email: e.target.value }))} type="email" className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-sm focus:border-primary outline-none" />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase opacity-50 tracking-widest">Nueva contraseña (opcional)</label>
+                        <input value={profileForm.password} onChange={e => setProfileForm(f => ({ ...f, password: e.target.value }))} type="password" placeholder="Dejar vacío para no cambiar" className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-sm focus:border-primary outline-none" />
+                      </div>
+                      <div className="flex gap-2 pt-2">
+                        <Button variant="outline" className="flex-1 border-white/10" onClick={() => setShowProfile(false)}>Cancelar</Button>
+                        <Button className="flex-1 font-bold" onClick={saveProfile}>Guardar</Button>
+                      </div>
+                      <Separator className="opacity-10" />
+                      <Button variant="ghost" className="w-full text-red-400 hover:bg-red-500/10 text-xs" onClick={() => { setShowProfile(false); setShowDeleteConfirm(true); }}>
+                        <Trash2 className="w-3 h-3 mr-2" /> Eliminar mi cuenta permanentemente
+                      </Button>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+
+                {/* Delete Account Confirmation */}
+                <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+                  <DialogContent className="sm:max-w-[400px] bg-[#16161e] border-white/10 text-white">
+                    <div className="flex flex-col items-center text-center py-6 space-y-4">
+                      <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center">
+                        <AlertTriangle className="w-8 h-8 text-red-400" />
+                      </div>
+                      <DialogHeader>
+                        <DialogTitle className="text-lg font-bold text-red-400">Eliminar cuenta</DialogTitle>
+                      </DialogHeader>
+                      <p className="text-sm opacity-70">Esta acción es irreversible. Se eliminarán permanentemente todos tus datos: libros, notas, marcadores y progreso de lectura.</p>
+                      <div className="flex gap-2 w-full pt-2">
+                        <Button variant="outline" className="flex-1 border-white/10" onClick={() => setShowDeleteConfirm(false)}>Cancelar</Button>
+                        <Button className="flex-1 bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 font-bold" onClick={handleDeleteAccount}>Eliminar</Button>
                       </div>
                     </div>
                   </DialogContent>
