@@ -393,6 +393,25 @@ collect_and_clean() {
 
     # ── Desktop artifacts ──
     if [[ "$build_type" == "desktop" || "$build_type" == "both" ]]; then
+        # Copiar binario si existe
+        local bin_name
+        bin_name=$(grep -o '"productName": *"[^"]*"' "$TAURI_DIR/tauri.conf.json" 2>/dev/null | head -1 | cut -d'"' -f4)
+        [[ -z "$bin_name" ]] && bin_name="tauri-app"
+        local bin_path=""
+        for profile in release debug; do
+            if [[ -x "$TAURI_DIR/target/$profile/$bin_name" ]]; then
+                bin_path="$TAURI_DIR/target/$profile/$bin_name"
+                break
+            fi
+        done
+        if [[ -n "$bin_path" ]]; then
+            local size
+            size=$(du -h "$bin_path" | cut -f1)
+            cp "$bin_path" "$out_dir/$bin_name"
+            success "${bin_name} ${DIM}(${size})${NC}"
+            ((count++))
+        fi
+
         local bundle_dir="$TAURI_DIR/target/release/bundle"
         if [[ -d "$bundle_dir" ]]; then
             find "$bundle_dir" -maxdepth 2 -type f \( \
@@ -406,10 +425,10 @@ collect_and_clean() {
                 success "${fname} ${DIM}(${size})${NC}"
             done
             # Contar lo copiado
-            count=$(find "$out_dir" -maxdepth 1 -type f \( \
+            count=$((count + $(find "$out_dir" -maxdepth 1 -type f \( \
                 -name "*.deb" -o -name "*.rpm" -o -name "*.AppImage" \
                 -o -name "*.exe" -o -name "*.msi" -o -name "*.dmg" \
-            \) 2>/dev/null | wc -l)
+            \) 2>/dev/null | wc -l)))
         fi
 
         # Limpiar bundles intermedios (NO target/ completo, eso es cache de Rust)
@@ -612,6 +631,78 @@ cmd_build() {
     esac
 }
 
+trigger_github_build() {
+    local sel="$1"
+    local platform=""
+    case $sel in
+        6) platform="linux" ;;
+        7) platform="windows" ;;
+        8) platform="macos" ;;
+        9) platform="all" ;;
+    esac
+
+    if ! command -v gh &>/dev/null; then
+        error "Se necesita ${CYAN}gh${NC} (GitHub CLI) para lanzar builds remotos"
+        info "Instalar: ${CYAN}sudo pacman -S github-cli${NC} (Arch)"
+        info "Luego: ${CYAN}gh auth login${NC}"
+        return 1
+    fi
+
+    if ! gh auth status &>/dev/null 2>&1; then
+        error "No estás autenticado en GitHub CLI"
+        info "Ejecuta: ${CYAN}gh auth login${NC}"
+        return 1
+    fi
+
+    # Verificar que hay cambios pusheados
+    local branch
+    branch=$(git branch --show-current 2>/dev/null)
+    local local_hash remote_hash
+    local_hash=$(git rev-parse HEAD 2>/dev/null)
+    remote_hash=$(git rev-parse "origin/$branch" 2>/dev/null || echo "none")
+
+    if [[ "$local_hash" != "$remote_hash" ]]; then
+        warn "La rama ${WHITE}${branch}${NC} tiene commits sin pushear"
+        if confirm "¿Pushear antes de lanzar el build?"; then
+            git push origin "$branch" || { error "No se pudo pushear"; return 1; }
+            success "Push completado"
+        else
+            warn "El build usará el último código pusheado, no tus cambios locales"
+        fi
+    fi
+
+    echo ""
+    info "Plataforma: ${CYAN}${platform}${NC}"
+    info "Rama: ${CYAN}${branch}${NC}"
+    echo ""
+
+    step "Lanzando workflow en GitHub Actions..."
+    if gh workflow run build-release.yml \
+        --ref "$branch" \
+        -f "platforms=$platform" \
+        -f "debug=false" 2>/dev/null; then
+        echo ""
+        success "Build lanzado en GitHub Actions"
+        echo ""
+        info "Para ver el progreso:"
+        echo -e "    ${CYAN}gh run list --workflow=build-release.yml${NC}"
+        echo -e "    ${CYAN}gh run watch${NC}"
+        echo ""
+        info "Para descargar los artefactos cuando termine:"
+        echo -e "    ${CYAN}gh run download${NC}"
+        echo ""
+
+        if confirm "¿Abrir GitHub Actions en el navegador?"; then
+            gh run list --workflow=build-release.yml --limit 1 --json url --jq '.[0].url' 2>/dev/null | xargs xdg-open 2>/dev/null \
+                || gh browse --repo "$(gh repo view --json nameWithOwner -q .nameWithOwner)" /actions 2>/dev/null
+        fi
+    else
+        error "No se pudo lanzar el workflow"
+        info "Verifica que el workflow existe en el repo remoto"
+        info "Puede que necesites pushear primero: ${CYAN}git push${NC}"
+    fi
+}
+
 cmd_build_desktop() {
     echo ""
     echo -e "  ${BOLD}${CYAN}🖥️  Build Desktop${NC}"
@@ -619,23 +710,18 @@ cmd_build_desktop() {
     echo ""
     echo -e "  ${WHITE}Selecciona los formatos de salida:${NC}"
     echo ""
-    echo -e "  ${BOLD}Linux:${NC}"
-    echo -e "    ${WHITE}1${NC}) ${GREEN}AppImage${NC}       ${DIM}— Ejecutable universal Linux${NC}"
-    echo -e "    ${WHITE}2${NC}) ${GREEN}DEB${NC}            ${DIM}— Paquete Debian/Ubuntu${NC}"
-    echo -e "    ${WHITE}3${NC}) ${GREEN}RPM${NC}            ${DIM}— Paquete Fedora/RHEL${NC}"
+    echo -e "  ${BOLD}Linux (local):${NC}"
+    echo -e "    ${WHITE}1${NC}) ${GREEN}Binario${NC}        ${DIM}— Solo el ejecutable (sin empaquetar)${NC}"
+    echo -e "    ${WHITE}2${NC}) ${GREEN}AppImage${NC}       ${DIM}— Ejecutable universal Linux${NC}"
+    echo -e "    ${WHITE}3${NC}) ${GREEN}DEB${NC}            ${DIM}— Paquete Debian/Ubuntu${NC}"
+    echo -e "    ${WHITE}4${NC}) ${GREEN}RPM${NC}            ${DIM}— Paquete Fedora/RHEL${NC}"
+    echo -e "    ${WHITE}5${NC}) ${MAGENTA}Todo Linux${NC}     ${DIM}— Binario + AppImage + DEB + RPM${NC}"
     echo ""
-    echo -e "  ${BOLD}Windows:${NC}"
-    echo -e "    ${WHITE}4${NC}) ${GREEN}NSIS${NC}           ${DIM}— Instalador Windows (.exe)${NC}"
-    echo -e "    ${WHITE}5${NC}) ${GREEN}MSI${NC}            ${DIM}— Instalador Windows (.msi)${NC}"
-    echo ""
-    echo -e "  ${BOLD}macOS:${NC}"
-    echo -e "    ${WHITE}6${NC}) ${GREEN}DMG${NC}            ${DIM}— Imagen de disco macOS${NC}"
-    echo -e "    ${WHITE}7${NC}) ${GREEN}App Bundle${NC}     ${DIM}— Aplicación macOS (.app)${NC}"
-    echo ""
-    echo -e "  ${BOLD}Combos:${NC}"
-    echo -e "    ${WHITE}8${NC}) ${MAGENTA}Todo Linux${NC}     ${DIM}— AppImage + DEB + RPM${NC}"
-    echo -e "    ${WHITE}9${NC}) ${MAGENTA}Todo Windows${NC}   ${DIM}— NSIS + MSI${NC}"
-    echo -e "    ${WHITE}A${NC}) ${MAGENTA}TODOS Desktop${NC}  ${DIM}— Todos los formatos desktop${NC}"
+    echo -e "  ${BOLD}Multiplataforma (GitHub Actions):${NC}"
+    echo -e "    ${WHITE}6${NC}) ${CYAN}GitHub: Linux${NC}          ${DIM}— Compilar en la nube${NC}"
+    echo -e "    ${WHITE}7${NC}) ${CYAN}GitHub: Windows${NC}        ${DIM}— .exe + .msi${NC}"
+    echo -e "    ${WHITE}8${NC}) ${CYAN}GitHub: macOS${NC}           ${DIM}— .dmg (Intel + ARM)${NC}"
+    echo -e "    ${WHITE}9${NC}) ${CYAN}GitHub: TODAS${NC}          ${DIM}— Linux + Windows + macOS${NC}"
     echo ""
     echo -e "    ${WHITE}0${NC}) ${DIM}Volver${NC}"
     echo ""
@@ -651,16 +737,16 @@ cmd_build_desktop() {
     for sel in "${selections[@]}"; do
         sel=$(echo "$sel" | tr -d ' ' | tr '[:lower:]' '[:upper:]')
         case $sel in
-            1) bundles+=("appimage") ;;
-            2) bundles+=("deb") ;;
-            3) bundles+=("rpm") ;;
-            4) bundles+=("nsis") ;;
-            5) bundles+=("msi") ;;
-            6) bundles+=("dmg") ;;
-            7) bundles+=("app") ;;
-            8) bundles+=("appimage" "deb" "rpm") ;;
-            9) bundles+=("nsis" "msi") ;;
-            A) bundles+=("appimage" "deb" "rpm" "nsis" "msi" "dmg" "app") ;;
+            1) bundles+=("none") ;;
+            2) bundles+=("appimage") ;;
+            3) bundles+=("deb") ;;
+            4) bundles+=("rpm") ;;
+            5) bundles+=("none" "appimage" "deb" "rpm") ;;
+            6|7|8|9)
+                trigger_github_build "$sel"
+                press_enter
+                return
+                ;;
             *) warn "Opción '$sel' no reconocida, ignorada" ;;
         esac
     done
@@ -673,8 +759,25 @@ cmd_build_desktop() {
         return
     fi
 
+    # Separar: ¿solo binario, solo bundles, o ambos?
+    local want_binary=false
+    local real_bundles=()
+    for b in "${unique_bundles[@]}"; do
+        if [[ "$b" == "none" ]]; then
+            want_binary=true
+        else
+            real_bundles+=("$b")
+        fi
+    done
+
     echo ""
-    info "Formatos seleccionados: ${CYAN}${unique_bundles[*]}${NC}"
+    if $want_binary && [[ ${#real_bundles[@]} -eq 0 ]]; then
+        info "Formato seleccionado: ${CYAN}Binario (solo ejecutable)${NC}"
+    elif $want_binary; then
+        info "Formatos seleccionados: ${CYAN}Binario + ${real_bundles[*]}${NC}"
+    else
+        info "Formatos seleccionados: ${CYAN}${real_bundles[*]}${NC}"
+    fi
     separator
 
     # Preguntar modo de compilación
@@ -686,25 +789,50 @@ cmd_build_desktop() {
     read -r build_mode
     [[ -z "$build_mode" ]] && build_mode="1"
 
+    local cargo_profile="release"
     local extra_args=""
     if [[ "$build_mode" == "2" ]]; then
         extra_args="--debug"
+        cargo_profile="debug"
         info "Compilando en modo ${YELLOW}debug${NC}"
     else
         info "Compilando en modo ${GREEN}release${NC}"
     fi
 
     echo ""
-    local bundle_arg
-    bundle_arg=$(IFS=','; echo "${unique_bundles[*]}")
-
-    step "Ejecutando: ${DIM}npm run tauri build -- --bundles ${bundle_arg} ${extra_args}${NC}"
-    echo ""
-
     cd "$PROJECT_DIR"
-
     local start_time=$SECONDS
-    if npm run tauri build -- --bundles "$bundle_arg" $extra_args; then
+    local build_ok=true
+
+    if [[ ${#real_bundles[@]} -gt 0 ]]; then
+        # Tiene bundles reales → usar tauri build (también genera el binario)
+        local bundle_arg
+        bundle_arg=$(IFS=','; echo "${real_bundles[*]}")
+        step "Ejecutando: ${DIM}npm run tauri build -- --bundles ${bundle_arg} ${extra_args}${NC}"
+        echo ""
+        if ! npm run tauri build -- --bundles "$bundle_arg" $extra_args; then
+            build_ok=false
+        fi
+    else
+        # Solo binario → compilar frontend + cargo build
+        step "Compilando frontend..."
+        if npm run build; then
+            echo ""
+            step "Compilando binario Rust..."
+            if [[ "$cargo_profile" == "release" ]]; then
+                (cd "$TAURI_DIR" && cargo build --release)
+            else
+                (cd "$TAURI_DIR" && cargo build)
+            fi
+            if [[ $? -ne 0 ]]; then
+                build_ok=false
+            fi
+        else
+            build_ok=false
+        fi
+    fi
+
+    if $build_ok; then
         local elapsed=$(( SECONDS - start_time ))
         echo ""
         success "Build Desktop completado en ${GREEN}${elapsed}s${NC}"

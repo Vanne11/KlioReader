@@ -8,7 +8,8 @@ import {
   LayoutGrid, Grid2X2, List, Settings2,
   Cloud, CloudUpload, CloudDownload, LogIn, LogOut, User, Loader2, Server, Trash2, Pencil, FolderOpen,
   Play, ChevronLeft, AlertTriangle, CheckCircle2, Info,
-  StickyNote, Bookmark as BookmarkIcon, Plus, MessageSquare
+  StickyNote, Bookmark as BookmarkIcon, Plus, MessageSquare,
+  Key, Brain, Eye
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -60,6 +61,8 @@ type LibraryView = 'grid-large' | 'grid-mini' | 'grid-card' | 'list-info';
 type ReaderTheme = 'dark' | 'sepia' | 'light';
 type ReadView = 'scroll' | 'paginated';
 type ReaderFont = 'Libre Baskerville' | 'Inter' | 'Merriweather' | 'Literata' | 'OpenDyslexic';
+type SettingsTab = 'display' | 'llm' | 'folder';
+type LlmProvider = 'groq' | 'google' | 'anthropic' | 'openai' | 'ollama' | 'custom';
 
 const EpubImage = ({ src, bookPath }: { src: string, bookPath: string }) => {
   const [imgUrl, setImgUrl] = useState<string | null>(null);
@@ -130,6 +133,11 @@ function App() {
   const [badgeFilter, setBadgeFilter] = useState<'all' | BadgeCategory>('all');
   const [selectedTitleId, setSelectedTitleId] = useState<string | null>(() => localStorage.getItem('klioSelectedTitle'));
   const [selectedBadgeDetail, setSelectedBadgeDetail] = useState<BadgeWithStatus | null>(null);
+
+  // Settings
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('display');
+  const [llmProvider, setLlmProvider] = useState<LlmProvider>(() => (localStorage.getItem('klioLlmProvider') as LlmProvider) || 'groq');
+  const [llmApiKey, setLlmApiKey] = useState<string>(() => localStorage.getItem('klioLlmApiKey') || '');
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [numPages, setNumPages] = useState<number | null>(null);
@@ -219,6 +227,8 @@ function App() {
   useEffect(() => { localStorage.setItem("readView", readView); }, [readView]);
   useEffect(() => { localStorage.setItem("readerPageColumns", pageColumns.toString()); }, [pageColumns]);
   useEffect(() => { localStorage.setItem("readerFont", readerFont); }, [readerFont]);
+  useEffect(() => { localStorage.setItem("klioLlmProvider", llmProvider); }, [llmProvider]);
+  useEffect(() => { localStorage.setItem("klioLlmApiKey", llmApiKey); }, [llmApiKey]);
   useEffect(() => {
     localStorage.setItem("userStats", JSON.stringify(stats));
     if (initialRenderRef.current || cloudSyncingRef.current) return;
@@ -1106,6 +1116,7 @@ function App() {
             <Button variant={activeTab === "library" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => setActiveTab("library")}><Library className="w-5 h-5 text-primary" /> Biblioteca</Button>
             <Button variant={activeTab === "cloud" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => setActiveTab("cloud")}><Cloud className="w-5 h-5 text-blue-400" /> Nube</Button>
             <Button variant={activeTab === "gamification" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => setActiveTab("gamification")}><Trophy className="w-5 h-5 text-yellow-500" /> Mi Progreso</Button>
+            <Button variant={activeTab === "settings" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => setActiveTab("settings")}><Settings2 className="w-5 h-5 text-zinc-400" /> Configuración</Button>
           </nav>
           <div className="p-6 mt-auto border-t border-white/5">
             {authUser ? (
