@@ -181,6 +181,17 @@ if (empty($errors)) {
             $pdo->exec(file_get_contents($migration009));
             $checks[] = array('Migración 009 (colecciones)', 'Aplicada', true);
         }
+
+        // Migración 010: Permitir formatos de cómic (cbr, cbz)
+        $migration010 = __DIR__ . '/migrations/010_allow_comic_filetypes.sql';
+        if (file_exists($migration010)) {
+            // Solo aplicar si el CHECK constraint actual no incluye cbr
+            $tableInfo = $pdo->query("SELECT sql FROM sqlite_master WHERE type='table' AND name='books'")->fetchColumn();
+            if ($tableInfo && strpos($tableInfo, 'cbr') === false) {
+                $pdo->exec(file_get_contents($migration010));
+            }
+            $checks[] = array('Migración 010 (cómics)', 'Aplicada', true);
+        }
     } catch (Exception $e) {
         $errors[] = 'Error al crear la base de datos: ' . $e->getMessage();
         $checks[] = array('Base de datos SQLite', 'Error: ' . $e->getMessage(), false);

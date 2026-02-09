@@ -23,6 +23,7 @@ import { useIsMobile } from '@/hooks/useIsMobile';
 import { useSharedNotes } from '@/hooks/useSharedNotes';
 import { useVoiceNotes } from '@/hooks/useVoiceNotes';
 import { FoliateReader } from '@/components/reader/FoliateReader';
+import { ComicReader } from '@/components/reader/ComicReader';
 import { SharedNoteBubble } from '@/components/social/SharedNoteBubble';
 import { VoiceNoteRecorder } from '@/components/social/VoiceNoteRecorder';
 import { themeClasses, READER_FONTS, isComicType } from '@/lib/constants';
@@ -90,7 +91,7 @@ export function ReaderView() {
   const scale = 1.0;
   const isPdf = currentBook.type === 'pdf';
   const isComic = isComicType(currentBook.type);
-  const usesFoliate = !isPdf; // epub, cbz, cbr all use foliate-js
+  const usesFoliate = !isPdf && !isComic; // only epub uses foliate-js
 
   return (
     <div ref={containerRef} className={`flex flex-col h-screen ${themeClasses[readerTheme]} transition-colors duration-300`} style={{ paddingTop: 'var(--sat)', paddingBottom: 'var(--sab)' }}>
@@ -105,32 +106,36 @@ export function ReaderView() {
             <DialogContent className="sm:max-w-[425px] bg-[#16161e] border-white/10 text-white">
               <DialogHeader><DialogTitle>{t('reader.readingSettings')}</DialogTitle></DialogHeader>
               <div className="py-6 space-y-8">
-                <div className="space-y-3">
-                  <p className="text-xs font-bold uppercase opacity-50 tracking-widest">{t('reader.viewMode')}</p>
-                  <div className="flex gap-2">
-                    <Button variant={readView === 'scroll' ? 'default' : 'secondary'} className="flex-1" onClick={() => setReadView('scroll')}><ScrollIcon className="w-4 h-4 mr-2" /> {t('reader.scroll')}</Button>
-                    <Button variant={readView === 'paginated' ? 'default' : 'secondary'} className="flex-1" onClick={() => setReadView('paginated')}><Columns2 className="w-4 h-4 mr-2" /> {t('reader.paginated')}</Button>
-                  </div>
-                  {readView === 'paginated' && (
-                    <div className="flex gap-2 pt-2 border-t border-white/5 mt-2">
-                      <Button variant={pageColumns === 1 ? 'outline' : 'ghost'} className="flex-1 text-xs" onClick={() => setPageColumns(1)}><Square className="w-3 h-3 mr-2" /> {t('reader.oneColumn')}</Button>
-                      <Button variant={pageColumns === 2 ? 'outline' : 'ghost'} className="flex-1 text-xs" onClick={() => setPageColumns(2)}><Columns2 className="w-3 h-3 mr-2" /> {t('reader.twoColumns')}</Button>
+                {!isComic && (
+                  <div className="space-y-3">
+                    <p className="text-xs font-bold uppercase opacity-50 tracking-widest">{t('reader.viewMode')}</p>
+                    <div className="flex gap-2">
+                      <Button variant={readView === 'scroll' ? 'default' : 'secondary'} className="flex-1" onClick={() => setReadView('scroll')}><ScrollIcon className="w-4 h-4 mr-2" /> {t('reader.scroll')}</Button>
+                      <Button variant={readView === 'paginated' ? 'default' : 'secondary'} className="flex-1" onClick={() => setReadView('paginated')}><Columns2 className="w-4 h-4 mr-2" /> {t('reader.paginated')}</Button>
                     </div>
-                  )}
-                </div>
-                <div className="space-y-3">
-                  <p className="text-xs font-bold uppercase opacity-50 tracking-widest">{t('reader.typography')}</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {READER_FONTS.map(font => (
-                      <Button key={font} variant={readerFont === font ? 'outline' : 'ghost'} className="justify-start text-[10px] h-8 truncate" onClick={() => setReaderFont(font)} style={{ fontFamily: font }}>{font}</Button>
-                    ))}
+                    {readView === 'paginated' && (
+                      <div className="flex gap-2 pt-2 border-t border-white/5 mt-2">
+                        <Button variant={pageColumns === 1 ? 'outline' : 'ghost'} className="flex-1 text-xs" onClick={() => setPageColumns(1)}><Square className="w-3 h-3 mr-2" /> {t('reader.oneColumn')}</Button>
+                        <Button variant={pageColumns === 2 ? 'outline' : 'ghost'} className="flex-1 text-xs" onClick={() => setPageColumns(2)}><Columns2 className="w-3 h-3 mr-2" /> {t('reader.twoColumns')}</Button>
+                      </div>
+                    )}
                   </div>
-                  <div className="flex items-center justify-between bg-black/20 p-2 rounded-lg">
-                    <Button variant="ghost" size="icon" onClick={() => setFontSize(f => Math.max(12, f-2))}><ZoomOut className="w-4 h-4" /></Button>
-                    <span className="text-sm font-mono font-bold">{fontSize}px</span>
-                    <Button variant="ghost" size="icon" onClick={() => setFontSize(f => Math.min(36, f+2))}><ZoomIn className="w-4 h-4" /></Button>
+                )}
+                {!isComic && (
+                  <div className="space-y-3">
+                    <p className="text-xs font-bold uppercase opacity-50 tracking-widest">{t('reader.typography')}</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {READER_FONTS.map(font => (
+                        <Button key={font} variant={readerFont === font ? 'outline' : 'ghost'} className="justify-start text-[10px] h-8 truncate" onClick={() => setReaderFont(font)} style={{ fontFamily: font }}>{font}</Button>
+                      ))}
+                    </div>
+                    <div className="flex items-center justify-between bg-black/20 p-2 rounded-lg">
+                      <Button variant="ghost" size="icon" onClick={() => setFontSize(f => Math.max(12, f-2))}><ZoomOut className="w-4 h-4" /></Button>
+                      <span className="text-sm font-mono font-bold">{fontSize}px</span>
+                      <Button variant="ghost" size="icon" onClick={() => setFontSize(f => Math.min(36, f+2))}><ZoomIn className="w-4 h-4" /></Button>
+                    </div>
                   </div>
-                </div>
+                )}
                 <div className="space-y-3">
                   <p className="text-xs font-bold uppercase opacity-50 tracking-widest">{t('reader.theme')}</p>
                   <div className="flex gap-2">

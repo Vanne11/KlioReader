@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS books (
     file_name TEXT NOT NULL,
     file_path TEXT NOT NULL,
     file_size INTEGER DEFAULT 0,
-    file_type TEXT NOT NULL CHECK(file_type IN ('epub', 'pdf')),
+    file_type TEXT NOT NULL CHECK(file_type IN ('epub', 'pdf', 'cbr', 'cbz')),
     cover_base64 TEXT DEFAULT NULL,
     total_chapters INTEGER DEFAULT 0,
     storage_type TEXT DEFAULT 'local',

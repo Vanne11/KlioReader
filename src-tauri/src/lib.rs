@@ -521,6 +521,106 @@ fn rename_file(file_path: String, new_name: String) -> Result<String, String> {
     Ok(dest.to_string_lossy().to_string())
 }
 
+#[derive(Serialize)]
+struct ComicPages {
+    temp_dir: String,
+    pages: Vec<String>,
+}
+
+#[tauri::command]
+fn extract_comic_pages(path: String, book_type: String) -> Result<ComicPages, String> {
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let temp_dir = std::env::temp_dir().join(format!("klio-comic-{}", timestamp));
+    std::fs::create_dir_all(&temp_dir).map_err(|e| format!("Error creando directorio temporal: {}", e))?;
+
+    let mut image_paths: Vec<String> = Vec::new();
+
+    if book_type == "cbr" {
+        // Extraer imágenes del RAR
+        let archive = unrar::Archive::new(&path).open_for_processing()
+            .map_err(|e| format!("Error abriendo CBR: {}", e))?;
+
+        let mut entries: Vec<(String, Vec<u8>)> = Vec::new();
+        let mut cursor = archive;
+
+        loop {
+            match cursor.read_header() {
+                Ok(Some(header)) => {
+                    let name = header.entry().filename.to_string_lossy().to_string();
+                    let is_file = header.entry().is_file();
+
+                    if is_file && is_image_file(&name) {
+                        match header.read() {
+                            Ok((data, next)) => {
+                                entries.push((name, data));
+                                cursor = next;
+                            }
+                            Err(e) => return Err(format!("Error leyendo entrada RAR: {}", e)),
+                        }
+                    } else {
+                        match header.skip() {
+                            Ok(next) => cursor = next,
+                            Err(e) => return Err(format!("Error saltando entrada RAR: {}", e)),
+                        }
+                    }
+                }
+                Ok(None) => break,
+                Err(e) => return Err(format!("Error leyendo header RAR: {}", e)),
+            }
+        }
+
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+        for (i, (_name, data)) in entries.iter().enumerate() {
+            let ext = _name.rsplit('.').next().unwrap_or("jpg");
+            let out_path = temp_dir.join(format!("{:05}.{}", i, ext));
+            std::fs::write(&out_path, data)
+                .map_err(|e| format!("Error escribiendo imagen: {}", e))?;
+            image_paths.push(out_path.to_string_lossy().to_string());
+        }
+    } else {
+        // CBZ (ZIP)
+        let file = std::fs::File::open(&path).map_err(|e| e.to_string())?;
+        let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+
+        let mut names: Vec<String> = (0..archive.len())
+            .filter_map(|i| archive.by_index(i).ok().map(|f| f.name().to_string()))
+            .filter(|name| is_image_file(name))
+            .collect();
+        names.sort();
+
+        for (i, name) in names.iter().enumerate() {
+            let mut entry = archive.by_name(name)
+                .map_err(|e| format!("Error leyendo entrada ZIP: {}", e))?;
+            let ext = name.rsplit('.').next().unwrap_or("jpg");
+            let out_path = temp_dir.join(format!("{:05}.{}", i, ext));
+            let mut buf = Vec::new();
+            entry.read_to_end(&mut buf)
+                .map_err(|e| format!("Error leyendo imagen: {}", e))?;
+            std::fs::write(&out_path, &buf)
+                .map_err(|e| format!("Error escribiendo imagen: {}", e))?;
+            image_paths.push(out_path.to_string_lossy().to_string());
+        }
+    }
+
+    Ok(ComicPages {
+        temp_dir: temp_dir.to_string_lossy().to_string(),
+        pages: image_paths,
+    })
+}
+
+#[tauri::command]
+fn cleanup_comic_temp(temp_dir: String) -> Result<(), String> {
+    if !temp_dir.contains("klio-comic-") {
+        return Err("Directorio no válido para limpieza".to_string());
+    }
+    std::fs::remove_dir_all(&temp_dir)
+        .map_err(|e| format!("Error limpiando directorio temporal: {}", e))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -544,6 +644,8 @@ pub fn run() {
             move_file_to_subfolder,
             move_file_to_root,
             rename_file,
+            extract_comic_pages,
+            cleanup_comic_temp,
             storage::commands::user_storage_test_connection,
             storage::commands::user_storage_configure,
             storage::commands::user_storage_sync_now,
