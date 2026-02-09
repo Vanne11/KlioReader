@@ -94,16 +94,47 @@ fn read_epub_chapter(path: String, chapter_index: usize) -> Result<String, Strin
 #[tauri::command]
 fn read_epub_resource(path: String, resource_path: String) -> Result<(Vec<u8>, String), String> {
     let mut doc = EpubDoc::new(path).map_err(|e| e.to_string())?;
-    
-    // Buscamos el recurso en el manifiesto para obtener el mime type
-    let mime = doc.resources.get(&resource_path)
-        .map(|r| r.mime.clone())
-        .unwrap_or_else(|| "image/jpeg".to_string()); // fallback común
 
-    let data = doc.get_resource_by_path(&resource_path)
-       .ok_or_else(|| format!("Resource not found: {}", resource_path))?;
-       
-    Ok((data, mime))
+    // Intento 1: buscar por path exacto
+    if let Some(data) = doc.get_resource_by_path(&resource_path) {
+        let mime = doc.resources.values()
+            .find(|r| r.path == std::path::PathBuf::from(&resource_path))
+            .map(|r| r.mime.clone())
+            .unwrap_or_else(|| "image/jpeg".to_string());
+        return Ok((data, mime));
+    }
+
+    // Intento 2: buscar recurso cuyo path termine con el resource_path solicitado
+    let matching = doc.resources.iter()
+        .find(|(_id, r)| {
+            let p = r.path.to_string_lossy();
+            p.ends_with(&resource_path) || p.ends_with(&format!("/{}", resource_path))
+        });
+
+    if let Some((id, _res)) = matching {
+        let id_clone = id.clone();
+        let (data, mime) = doc.get_resource(&id_clone)
+            .ok_or_else(|| format!("Resource not found by id: {}", id_clone))?;
+        return Ok((data, mime));
+    }
+
+    // Intento 3: buscar solo por nombre de archivo
+    let filename = resource_path.split('/').last().unwrap_or(&resource_path);
+    let matching_by_name = doc.resources.iter()
+        .find(|(_id, r)| {
+            r.path.file_name()
+                .map(|f| f.to_string_lossy() == filename)
+                .unwrap_or(false)
+        });
+
+    if let Some((id, _res)) = matching_by_name {
+        let id_clone = id.clone();
+        let (data, mime) = doc.get_resource(&id_clone)
+            .ok_or_else(|| format!("Resource not found by id: {}", id_clone))?;
+        return Ok((data, mime));
+    }
+
+    Err(format!("Resource not found: {}", resource_path))
 }
 
 #[tauri::command]

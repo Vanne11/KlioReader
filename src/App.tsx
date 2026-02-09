@@ -67,7 +67,7 @@ const EpubImage = ({ src, bookPath }: { src: string, bookPath: string }) => {
     let objectUrl: string | null = null;
     async function loadImg() {
       try {
-        const cleanPath = src.split('/').pop() || src;
+        const cleanPath = src.replace(/^\.\.\//, '').replace(/^\.\//, '');
         const [bytes, mime]: [number[], string] = await invoke("read_epub_resource", { path: bookPath, resourcePath: cleanPath });
         const blob = new Blob([new Uint8Array(bytes)], { type: mime });
         objectUrl = URL.createObjectURL(blob);
@@ -102,6 +102,7 @@ function App() {
   // Auth & Cloud
   const [authUser, setAuthUser] = useState<api.AuthUser | null>(api.getStoredUser);
   const [cloudBooks, setCloudBooks] = useState<api.CloudBook[]>([]);
+  const [cloudBooksReady, setCloudBooksReady] = useState(false);
   const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [cloudLoading, setCloudLoading] = useState(false);
@@ -113,6 +114,7 @@ function App() {
   const [alertModal, setAlertModal] = useState<{ title: string; message: string; type: 'error' | 'success' | 'info' } | null>(null);
   const [downloadingBookId, setDownloadingBookId] = useState<number | null>(null);
   const [queueCount, setQueueCount] = useState(syncQueue.getQueueCount());
+  const [queueSummary, setQueueSummary] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [profile, setProfile] = useState<api.UserProfile | null>(null);
@@ -134,6 +136,8 @@ function App() {
   const scale = 1.0;
   const readerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const initialRenderRef = useRef(true);
+  const cloudSyncingRef = useRef(false);
 
   // Sincronizar estado de pantalla completa
   useEffect(() => {
@@ -217,6 +221,7 @@ function App() {
   useEffect(() => { localStorage.setItem("readerFont", readerFont); }, [readerFont]);
   useEffect(() => {
     localStorage.setItem("userStats", JSON.stringify(stats));
+    if (initialRenderRef.current || cloudSyncingRef.current) return;
     if (api.isLoggedIn()) {
       syncQueue.enqueue('sync_stats', statsToApi(stats));
     }
@@ -224,10 +229,14 @@ function App() {
   useEffect(() => {
     if (selectedTitleId) localStorage.setItem('klioSelectedTitle', selectedTitleId);
     else localStorage.removeItem('klioSelectedTitle');
+    if (initialRenderRef.current || cloudSyncingRef.current) return;
     if (api.isLoggedIn()) {
       syncQueue.enqueue('sync_title', { selected_title_id: selectedTitleId });
     }
   }, [selectedTitleId]);
+
+  // Mark initial render as done (after stats/title effects have run once)
+  useEffect(() => { initialRenderRef.current = false; }, []);
 
   // Detectar nuevas insignias
   useEffect(() => {
@@ -253,10 +262,16 @@ function App() {
     }
     syncQueue.setBooksRef(() => booksRef.current);
     syncQueue.setOnUploadComplete(() => loadCloudBooks());
-    syncQueue.setOnQueueChange((count) => setQueueCount(count));
+    syncQueue.setOnQueueChange((count, summary) => { setQueueCount(count); setQueueSummary(summary); });
     syncQueue.startProcessing();
     return () => syncQueue.stopProcessing();
   }, [authUser]);
+
+  // Auto-enqueue uploads when local books change (e.g. after scan)
+  useEffect(() => {
+    if (!authUser || !booksLoaded || books.length === 0 || !cloudBooksReady) return;
+    autoEnqueueNewBooks(books, cloudBooks);
+  }, [books, cloudBooks, booksLoaded, authUser, cloudBooksReady]);
 
   useEffect(() => {
     if (!booksLoaded) return;
@@ -378,6 +393,7 @@ function App() {
     api.clearAuth();
     setAuthUser(null);
     setCloudBooks([]);
+    setCloudBooksReady(false);
   }
 
   function showAlert(type: 'error' | 'success' | 'info', title: string, message: string) {
@@ -394,15 +410,28 @@ function App() {
         api.getProfile().catch(() => null),
       ]);
       setCloudBooks(cloudBooksList);
+      setCloudBooksReady(true);
+      // Flag to prevent re-enqueuing cloud data back to queue
+      cloudSyncingRef.current = true;
       // Merge cloud stats: use whichever has more XP (conflict resolution)
       if (cloudStats) {
         const remote = statsFromApi(cloudStats);
+        // Pre-save server badges to localStorage so the badge useEffect
+        // won't re-notify badges earned on other devices
+        const booksForBadges = booksRef.current.map((b: any) => ({ progress: b.progress }));
+        const remoteBadges = getUnlockedBadges(remote, booksForBadges).map(b => b.id);
+        const savedRaw = localStorage.getItem('klioUnlockedBadges');
+        const previousIds: string[] = savedRaw ? JSON.parse(savedRaw) : [];
+        const merged = [...new Set([...previousIds, ...remoteBadges])];
+        localStorage.setItem('klioUnlockedBadges', JSON.stringify(merged));
         setStats(prev => remote.xp >= prev.xp ? remote : prev);
       }
       // Sync selected title from cloud
       if (cloudProfile?.selected_title_id) {
         setSelectedTitleId(cloudProfile.selected_title_id);
       }
+      // Reset flag after React processes the state updates
+      setTimeout(() => { cloudSyncingRef.current = false; }, 0);
       // Auto-upload local books not yet in cloud
       autoEnqueueNewBooks(booksRef.current, cloudBooksList);
     } catch (err: any) {
@@ -1128,9 +1157,9 @@ function App() {
                     <Tooltip><TooltipTrigger asChild>
                       <div className="flex items-center gap-1.5 text-amber-400 text-xs font-bold bg-amber-400/10 px-2.5 py-1.5 rounded-lg">
                         <Loader2 className="w-3 h-3 animate-spin" />
-                        <span>{queueCount}</span>
+                        <span>{queueSummary || `${queueCount} pendiente(s)`}</span>
                       </div>
-                    </TooltipTrigger><TooltipContent>{queueCount} operación(es) pendiente(s)</TooltipContent></Tooltip>
+                    </TooltipTrigger><TooltipContent>{queueCount} en cola: {queueSummary}</TooltipContent></Tooltip>
                   )}
                   {libraryPath ? (
                     <Tooltip><TooltipTrigger asChild>

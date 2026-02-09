@@ -25,8 +25,8 @@ let _getBooksRef: (() => any[]) | null = null;
 export function setBooksRef(cb: () => any[]) { _getBooksRef = cb; }
 
 // ── Callback para notificar cambios en la cola ──
-let _onQueueChange: ((count: number) => void) | null = null;
-export function setOnQueueChange(cb: (count: number) => void) { _onQueueChange = cb; }
+let _onQueueChange: ((count: number, summary: string) => void) | null = null;
+export function setOnQueueChange(cb: (count: number, summary: string) => void) { _onQueueChange = cb; }
 
 // ── Persistencia ──
 function loadQueue(): SyncOp[] {
@@ -38,7 +38,14 @@ function loadQueue(): SyncOp[] {
 
 function saveQueue(queue: SyncOp[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(queue));
-  _onQueueChange?.(queue.length);
+  const labels: Record<SyncOpType, string> = {
+    upload_book: 'Subiendo libro',
+    sync_progress: 'Sincronizando progreso',
+    sync_stats: 'Sincronizando estadísticas',
+    sync_title: 'Sincronizando título',
+  };
+  const summary = queue.length > 0 ? labels[queue[0].type] || 'Sincronizando...' : '';
+  _onQueueChange?.(queue.length, summary);
 }
 
 // ── Deduplicación ──
@@ -84,18 +91,33 @@ export function getQueueCount(): number {
   return loadQueue().length;
 }
 
+export function getQueueSummary(): string {
+  const queue = loadQueue();
+  if (queue.length === 0) return '';
+  const labels: Record<SyncOpType, string> = {
+    upload_book: 'Subiendo libro',
+    sync_progress: 'Sincronizando progreso',
+    sync_stats: 'Sincronizando estadísticas',
+    sync_title: 'Sincronizando título',
+  };
+  // Show the first (currently processing) operation
+  return labels[queue[0].type] || 'Sincronizando...';
+}
+
 // ── Conectividad ──
 async function isOnline(): Promise<boolean> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
     const url = api.getApiUrl();
-    await fetch(`${url}/api/health`, { signal: controller.signal, method: "HEAD" }).catch(() =>
-      fetch(url, { signal: controller.signal, method: "HEAD" })
-    );
+    const res = await fetch(`${url}/api/`, { signal: controller.signal });
     clearTimeout(timeout);
-    return true;
-  } catch {
+    if (!res.ok) {
+      console.warn(`[SyncQueue] Health check falló: ${res.status} ${res.statusText}`);
+    }
+    return res.ok;
+  } catch (err: any) {
+    console.warn(`[SyncQueue] Sin conexión al servidor:`, err?.message || err);
     return false;
   }
 }
@@ -178,22 +200,27 @@ export async function processQueue() {
   _processing = true;
   try {
     const online = await isOnline();
-    if (!online) return;
+    if (!online) {
+      console.log(`[SyncQueue] Offline — ${loadQueue().length} operación(es) esperando`);
+      return;
+    }
 
     let queue = loadQueue();
     if (queue.length === 0) return;
 
     // Procesar una a la vez
     const op = queue[0];
+    console.log(`[SyncQueue] Procesando: ${op.type}`, op.payload.bookPath || op.payload.bookTitle || '');
     try {
       const ok = await processOne(op);
       if (ok) {
+        console.log(`[SyncQueue] ✓ ${op.type} completado`);
         queue = loadQueue(); // Re-leer por si cambió durante el proceso
         queue = queue.filter(q => q.id !== op.id);
         saveQueue(queue);
       }
-    } catch (err) {
-      console.warn(`[SyncQueue] Error procesando ${op.type}:`, err);
+    } catch (err: any) {
+      console.warn(`[SyncQueue] Error procesando ${op.type} (intento ${op.retries + 1}/${MAX_RETRIES}):`, err?.message || err, '\nPayload:', JSON.stringify(op.payload).substring(0, 200));
       queue = loadQueue();
       const idx = queue.findIndex(q => q.id === op.id);
       if (idx !== -1) {

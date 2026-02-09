@@ -69,7 +69,13 @@ async function request<T>(
     return res.blob() as unknown as T;
   }
 
-  return res.json();
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    console.error(`[API] Respuesta no-JSON de ${endpoint}:`, text.substring(0, 500));
+    throw new Error(`Respuesta inválida del servidor (${res.status})`);
+  }
 }
 
 // ── Types ──
