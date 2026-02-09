@@ -1,0 +1,1 @@
+ALTER TABLE users ADD COLUMN is_subscriber INTEGER DEFAULT 0;

@@ -6,7 +6,7 @@ class UserController
     public function profile($params)
     {
         $db = Database::get();
-        $stmt = $db->prepare('SELECT id, username, email, avatar, xp, level, streak, last_streak_date, selected_title_id, storage_used, upload_limit, created_at FROM users WHERE id = ?');
+        $stmt = $db->prepare('SELECT id, username, email, avatar, xp, level, streak, last_streak_date, selected_title_id, storage_used, upload_limit, is_subscriber, created_at FROM users WHERE id = ?');
         $stmt->execute(array($params['user_id']));
         $user = $stmt->fetch();
 
@@ -39,6 +39,7 @@ class UserController
         $user['total_bookmarks'] = (int)$bookmarkCount['total_bookmarks'];
         $user['storage_used'] = (int)$user['storage_used'];
         $user['upload_limit'] = (int)$user['upload_limit'];
+        $user['is_subscriber'] = (int)$user['is_subscriber'];
 
         echo json_encode($user);
     }

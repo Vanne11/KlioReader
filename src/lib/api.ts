@@ -159,6 +159,7 @@ export interface UserProfile extends AuthUser {
   total_bookmarks: number;
   storage_used: number;
   upload_limit: number;
+  is_subscriber: number;
   created_at: string;
 }
 

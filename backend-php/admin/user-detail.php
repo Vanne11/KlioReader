@@ -105,6 +105,7 @@ require_once __DIR__ . '/../templates/admin-layout.php';
             <div class="flex justify-between"><span class="text-klio-muted">ID</span><span class="font-mono"><?php echo $user['id']; ?></span></div>
             <div class="flex justify-between"><span class="text-klio-muted">Creado</span><span><?php echo e(substr($user['created_at'], 0, 16)); ?></span></div>
             <div class="flex justify-between"><span class="text-klio-muted">Actualizado</span><span><?php echo e(substr($user['updated_at'], 0, 16)); ?></span></div>
+            <div class="flex justify-between"><span class="text-klio-muted">Suscriptor</span><span class="<?php echo (int)$user['is_subscriber'] ? 'text-amber-400 font-bold' : 'text-klio-muted'; ?>"><?php echo (int)$user['is_subscriber'] ? 'Sí' : 'No'; ?></span></div>
             <div class="flex justify-between"><span class="text-klio-muted">Titulo</span><span class="font-mono text-xs"><?php echo $user['selected_title_id'] ? e($user['selected_title_id']) : '<span class="text-klio-muted">ninguno</span>'; ?></span></div>
         </div>
     </div>

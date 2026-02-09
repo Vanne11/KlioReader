@@ -1,0 +1,309 @@
+import {
+  BookOpen, Eye, Brain, FolderOpen, HardDrive, Library,
+  LayoutGrid, Grid2X2, List, Square,
+  Scroll as ScrollIcon, Columns2, ZoomIn, ZoomOut,
+  Key, Info, Loader2, Wifi, RefreshCw, AlertTriangle, Check, LogIn, Crown, Cloud,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { useLibraryStore } from '@/stores/libraryStore';
+import { useReaderStore } from '@/stores/readerStore';
+import { useSettingsStore } from '@/stores/settingsStore';
+import { useAuthStore } from '@/stores/authStore';
+import { useCloudStore } from '@/stores/cloudStore';
+import { useLibrary } from '@/hooks/useLibrary';
+import { useAuth } from '@/hooks/useAuth';
+import { useStorageSync } from '@/hooks/useStorageSync';
+import { READER_FONTS } from '@/lib/constants';
+import { formatBytes } from '@/lib/utils';
+import type { LlmProvider, UserStorageProvider } from '@/types';
+
+export function SettingsView() {
+  const books = useLibraryStore(s => s.books);
+  const libraryPath = useLibraryStore(s => s.libraryPath);
+  const libraryView = useLibraryStore(s => s.libraryView);
+  const isMobile = useLibraryStore(s => s.isMobile);
+  const { setLibraryView } = useLibraryStore();
+
+  const fontSize = useReaderStore(s => s.fontSize);
+  const readerTheme = useReaderStore(s => s.readerTheme);
+  const readView = useReaderStore(s => s.readView);
+  const pageColumns = useReaderStore(s => s.pageColumns);
+  const readerFont = useReaderStore(s => s.readerFont);
+  const { setFontSize, setReaderTheme, setReadView, setPageColumns, setReaderFont } = useReaderStore();
+
+  const {
+    settingsTab, setSettingsTab, llmProvider, setLlmProvider, llmApiKey, setLlmApiKey,
+    storageConfig, storageTesting, storageTestResult,
+    syncStatus, syncingManual, gdriveAuthLoading, storageConfigured,
+  } = useSettingsStore();
+
+  const authUser = useAuthStore(s => s.authUser);
+  const cloudBooks = useCloudStore(s => s.cloudBooks);
+  const profile = useAuthStore(s => s.profile);
+
+  const { selectLibraryFolder } = useLibrary();
+  const { loadProfile } = useAuth();
+  const {
+    handleStorageConfigChange, handleTestConnection,
+    handleSyncNow, handleToggleAutoSync, handleGDriveAuth, handleAutoSyncIntervalChange,
+  } = useStorageSync();
+
+  const isStorageConfigured = storageConfigured();
+
+  return (
+    <ScrollArea className="flex-1">
+      <div className="max-w-3xl mx-auto p-8 space-y-6">
+        <h2 className="text-2xl font-black tracking-tight">Configuración</h2>
+        <div className="flex bg-white/5 rounded-lg p-1 w-fit">
+          <Button variant={settingsTab === 'display' ? 'secondary' : 'ghost'} size="sm" className="text-xs gap-2" onClick={() => setSettingsTab('display')}><Eye className="w-4 h-4" /> Visualización</Button>
+          <Button variant={settingsTab === 'llm' ? 'secondary' : 'ghost'} size="sm" className="text-xs gap-2" onClick={() => setSettingsTab('llm')}><Brain className="w-4 h-4" /> API LLM</Button>
+          <Button variant={settingsTab === 'folder' ? 'secondary' : 'ghost'} size="sm" className="text-xs gap-2" onClick={() => setSettingsTab('folder')}><FolderOpen className="w-4 h-4" /> Carpeta de Libros</Button>
+          <Button variant={settingsTab === 'storage' ? 'secondary' : 'ghost'} size="sm" className="text-xs gap-2" onClick={() => setSettingsTab('storage')}><HardDrive className="w-4 h-4" /> Mi Storage</Button>
+        </div>
+
+        {settingsTab === 'display' && (
+          <div className="space-y-8">
+            <Card className="bg-white/5 border-white/5 p-6 space-y-4">
+              <h3 className="text-sm font-bold uppercase tracking-widest opacity-50 flex items-center gap-2"><LayoutGrid className="w-4 h-4" /> Vista de Biblioteca</h3>
+              <div className="flex gap-2">
+                <Button variant={libraryView === 'grid-large' ? 'default' : 'secondary'} size="sm" className="flex-1 text-xs gap-2" onClick={() => setLibraryView('grid-large')}><LayoutGrid className="w-4 h-4" /> Grande</Button>
+                <Button variant={libraryView === 'grid-mini' ? 'default' : 'secondary'} size="sm" className="flex-1 text-xs gap-2" onClick={() => setLibraryView('grid-mini')}><Grid2X2 className="w-4 h-4" /> Mini</Button>
+                <Button variant={libraryView === 'grid-card' ? 'default' : 'secondary'} size="sm" className="flex-1 text-xs gap-2" onClick={() => setLibraryView('grid-card')}><Square className="w-4 h-4" /> Tarjetas</Button>
+                <Button variant={libraryView === 'list-info' ? 'default' : 'secondary'} size="sm" className="flex-1 text-xs gap-2" onClick={() => setLibraryView('list-info')}><List className="w-4 h-4" /> Lista</Button>
+              </div>
+            </Card>
+            <Card className="bg-white/5 border-white/5 p-6 space-y-6">
+              <h3 className="text-sm font-bold uppercase tracking-widest opacity-50 flex items-center gap-2"><BookOpen className="w-4 h-4" /> Visor de Lectura</h3>
+              <div className="space-y-3">
+                <p className="text-xs font-bold opacity-40 uppercase tracking-widest">Modo de Vista</p>
+                <div className="flex gap-2">
+                  <Button variant={readView === 'scroll' ? 'default' : 'secondary'} className="flex-1" size="sm" onClick={() => setReadView('scroll')}><ScrollIcon className="w-4 h-4 mr-2" /> Scroll</Button>
+                  <Button variant={readView === 'paginated' ? 'default' : 'secondary'} className="flex-1" size="sm" onClick={() => setReadView('paginated')}><Columns2 className="w-4 h-4 mr-2" /> Páginas</Button>
+                </div>
+                {readView === 'paginated' && (
+                  <div className="flex gap-2 pt-2 border-t border-white/5 mt-2">
+                    <Button variant={pageColumns === 1 ? 'outline' : 'ghost'} className="flex-1 text-xs" size="sm" onClick={() => setPageColumns(1)}><Square className="w-3 h-3 mr-2" /> 1 Columna</Button>
+                    <Button variant={pageColumns === 2 ? 'outline' : 'ghost'} className="flex-1 text-xs" size="sm" onClick={() => setPageColumns(2)}><Columns2 className="w-3 h-3 mr-2" /> 2 Columnas</Button>
+                  </div>
+                )}
+              </div>
+              <div className="space-y-3">
+                <p className="text-xs font-bold opacity-40 uppercase tracking-widest">Tipografía</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {READER_FONTS.map(font => (
+                    <Button key={font} variant={readerFont === font ? 'outline' : 'ghost'} className="justify-start text-[11px] h-9 truncate" size="sm" onClick={() => setReaderFont(font)} style={{ fontFamily: font }}>{font}</Button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-3">
+                <p className="text-xs font-bold opacity-40 uppercase tracking-widest">Tamaño de Fuente</p>
+                <div className="flex items-center justify-between bg-black/20 p-3 rounded-lg max-w-xs">
+                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setFontSize(f => Math.max(12, f-2))}><ZoomOut className="w-4 h-4" /></Button>
+                  <span className="text-sm font-mono font-bold">{fontSize}px</span>
+                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setFontSize(f => Math.min(36, f+2))}><ZoomIn className="w-4 h-4" /></Button>
+                </div>
+              </div>
+              <div className="space-y-3">
+                <p className="text-xs font-bold opacity-40 uppercase tracking-widest">Tema del Visor</p>
+                <div className="flex gap-2 max-w-xs">
+                  <Button variant={readerTheme === 'light' ? 'outline' : 'ghost'} className="flex-1 bg-white text-black hover:bg-gray-100" size="sm" onClick={() => setReaderTheme('light')}>Claro</Button>
+                  <Button variant={readerTheme === 'sepia' ? 'outline' : 'ghost'} className="flex-1 bg-[#f4ecd8] text-[#5b4636] hover:bg-[#ebe2cf]" size="sm" onClick={() => setReaderTheme('sepia')}>Sepia</Button>
+                  <Button variant={readerTheme === 'dark' ? 'outline' : 'ghost'} className="flex-1 bg-[#1e1e2e] text-[#cdd6f4] hover:bg-[#252539]" size="sm" onClick={() => setReaderTheme('dark')}>Oscuro</Button>
+                </div>
+              </div>
+            </Card>
+          </div>
+        )}
+
+        {settingsTab === 'llm' && (
+          <div className="space-y-6">
+            <Card className="bg-white/5 border-white/5 p-6 space-y-6">
+              <div><h3 className="text-sm font-bold uppercase tracking-widest opacity-50 flex items-center gap-2"><Brain className="w-4 h-4" /> Proveedor de LLM</h3><p className="text-xs opacity-40 mt-1">Selecciona el proveedor de IA para funciones inteligentes (resúmenes, chat, etc.)</p></div>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                {([
+                  { id: 'groq' as LlmProvider, name: 'Groq', desc: 'Rápido y gratuito' },
+                  { id: 'google' as LlmProvider, name: 'Google (Gemini)', desc: 'Modelos Gemini' },
+                  { id: 'anthropic' as LlmProvider, name: 'Anthropic', desc: 'Claude' },
+                  { id: 'openai' as LlmProvider, name: 'OpenAI', desc: 'GPT / o1' },
+                  { id: 'ollama' as LlmProvider, name: 'Ollama', desc: 'Local / Sin API key' },
+                  { id: 'custom' as LlmProvider, name: 'Personalizado', desc: 'Endpoint propio' },
+                ]).map(p => (
+                  <button key={p.id} className={`p-4 rounded-xl border text-left transition-all ${llmProvider === p.id ? 'border-primary bg-primary/10 ring-1 ring-primary/30' : 'border-white/10 bg-white/[0.02] hover:bg-white/5'}`} onClick={() => setLlmProvider(p.id)}>
+                    <p className="text-sm font-bold">{p.name}</p><p className="text-[10px] opacity-50 mt-0.5">{p.desc}</p>
+                  </button>
+                ))}
+              </div>
+              <div className="space-y-3">
+                <p className="text-xs font-bold opacity-40 uppercase tracking-widest flex items-center gap-2"><Key className="w-3 h-3" /> API Key</p>
+                <input type="password" value={llmApiKey} onChange={e => setLlmApiKey(e.target.value)} placeholder={llmProvider === 'ollama' ? 'No requiere API key' : 'Ingresa tu API key...'} disabled={llmProvider === 'ollama'} className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-sm focus:border-primary outline-none disabled:opacity-30 disabled:cursor-not-allowed" />
+                <p className="text-[10px] opacity-30 flex items-center gap-1"><Info className="w-3 h-3" /> Se guarda solo en este dispositivo. Nunca se envía a nuestros servidores.</p>
+              </div>
+            </Card>
+          </div>
+        )}
+
+        {settingsTab === 'folder' && (
+          <div className="space-y-6">
+            <Card className="bg-white/5 border-white/5 p-6 space-y-5">
+              <h3 className="text-sm font-bold uppercase tracking-widest opacity-50 flex items-center gap-2"><FolderOpen className="w-4 h-4" /> Carpeta de Biblioteca</h3>
+              {libraryPath ? (
+                <div className="space-y-4">
+                  <div className="bg-black/20 rounded-lg p-4 space-y-2">
+                    <p className="text-[10px] font-bold opacity-40 uppercase tracking-widest">Ruta actual</p>
+                    <p className="text-sm font-mono break-all opacity-80">{libraryPath}</p>
+                    {isMobile && <p className="text-[10px] opacity-30">Configurada automáticamente</p>}
+                  </div>
+                  <div className="flex items-center gap-4"><div className="flex items-center gap-2 text-xs opacity-60"><Library className="w-4 h-4 text-primary" /><span className="font-bold">{books.length} libro(s) encontrado(s)</span></div></div>
+                  {!isMobile && <Button variant="outline" size="sm" className="border-white/10 gap-2" onClick={selectLibraryFolder}><FolderOpen className="w-4 h-4" /> Cambiar Carpeta</Button>}
+                </div>
+              ) : (
+                <div className="text-center py-8 space-y-4">
+                  <FolderOpen className="w-12 h-12 mx-auto opacity-20" />
+                  <div><p className="text-sm font-bold opacity-60">Sin carpeta configurada</p><p className="text-xs opacity-30 mt-1">{isMobile ? 'La carpeta se configurará automáticamente' : 'Selecciona la carpeta donde tienes tus libros (EPUB, PDF)'}</p></div>
+                  {!isMobile && <Button className="gap-2 font-bold" onClick={selectLibraryFolder}><FolderOpen className="w-4 h-4" /> Seleccionar Carpeta</Button>}
+                </div>
+              )}
+            </Card>
+          </div>
+        )}
+
+        {settingsTab === 'storage' && (
+          <div className="space-y-6">
+            {authUser && profile?.is_subscriber ? (
+              <Card className="bg-white/5 border-white/5 p-6 space-y-6">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center"><Crown className="w-6 h-6 text-amber-400" /></div>
+                  <div><h3 className="text-sm font-bold">KlioReader Cloud</h3><p className="text-xs opacity-40">Tu biblioteca se sincroniza con nuestro servidor</p></div>
+                </div>
+                {profile ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold uppercase opacity-50 tracking-widest">Almacenamiento</span>
+                      <span className="text-sm font-bold">{formatBytes(profile.storage_used)} <span className="opacity-40 font-normal">/ {formatBytes(profile.upload_limit)}</span></span>
+                    </div>
+                    <div className="w-full h-3 bg-white/5 rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full transition-all ${(profile.storage_used / profile.upload_limit) > 0.9 ? 'bg-red-500' : (profile.storage_used / profile.upload_limit) > 0.7 ? 'bg-amber-500' : 'bg-primary'}`} style={{ width: `${Math.min(100, (profile.storage_used / profile.upload_limit) * 100)}%` }} />
+                    </div>
+                    <div className="flex justify-between text-[10px] opacity-40"><span>{Math.round((profile.storage_used / profile.upload_limit) * 100)}% usado</span><span>{formatBytes(profile.upload_limit - profile.storage_used)} disponibles</span></div>
+                  </div>
+                ) : (
+                  <Button variant="outline" size="sm" className="border-white/10 gap-2" onClick={() => loadProfile(false)}><Loader2 className="w-4 h-4" /> Cargar datos de almacenamiento</Button>
+                )}
+                <Separator className="opacity-10" />
+                <div className="flex items-center gap-3 text-[10px] opacity-30"><Cloud className="w-4 h-4 flex-shrink-0" /><span>{cloudBooks.length} libro(s) en la nube. Gestiona tu biblioteca desde la pestaña Nube.</span></div>
+              </Card>
+            ) : (
+              <>
+                <Card className="bg-white/5 border-white/5 p-6 space-y-6">
+                  <div><h3 className="text-sm font-bold uppercase tracking-widest opacity-50 flex items-center gap-2"><HardDrive className="w-4 h-4" /> Proveedor de Storage</h3><p className="text-xs opacity-40 mt-1">Sincroniza tu biblioteca con tu propio almacenamiento. Los datos nunca pasan por nuestro servidor.</p></div>
+                  <div className="grid grid-cols-3 gap-3">
+                    {([
+                      { id: 's3' as UserStorageProvider, name: 'S3-Compatible', desc: 'AWS, Backblaze, MinIO, Wasabi' },
+                      { id: 'webdav' as UserStorageProvider, name: 'WebDAV', desc: 'Nextcloud, ownCloud, etc.' },
+                      { id: 'gdrive' as UserStorageProvider, name: 'Google Drive', desc: 'Tu cuenta de Google' },
+                    ]).map(p => (
+                      <button key={p.id} className={`p-4 rounded-xl border text-left transition-all ${storageConfig.provider === p.id ? 'border-primary bg-primary/10 ring-1 ring-primary/30' : 'border-white/10 bg-white/[0.02] hover:bg-white/5'}`} onClick={() => handleStorageConfigChange({ provider: p.id })}>
+                        <p className="text-sm font-bold">{p.name}</p><p className="text-[10px] opacity-50 mt-0.5">{p.desc}</p>
+                      </button>
+                    ))}
+                  </div>
+
+                  {storageConfig.provider === 's3' && (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div><label className="text-[10px] font-bold opacity-40 uppercase">Endpoint (vacío = AWS)</label><input value={storageConfig.s3_endpoint || ''} onChange={e => handleStorageConfigChange({ s3_endpoint: e.target.value })} placeholder="https://s3.us-west-000.backblazeb2.com" className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-primary outline-none mt-1" /></div>
+                        <div><label className="text-[10px] font-bold opacity-40 uppercase">Región</label><input value={storageConfig.s3_region || ''} onChange={e => handleStorageConfigChange({ s3_region: e.target.value })} placeholder="us-east-1" className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-primary outline-none mt-1" /></div>
+                      </div>
+                      <div><label className="text-[10px] font-bold opacity-40 uppercase">Bucket</label><input value={storageConfig.s3_bucket || ''} onChange={e => handleStorageConfigChange({ s3_bucket: e.target.value })} placeholder="mi-bucket" className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-primary outline-none mt-1" /></div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div><label className="text-[10px] font-bold opacity-40 uppercase">Access Key</label><input value={storageConfig.s3_access_key || ''} onChange={e => handleStorageConfigChange({ s3_access_key: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-primary outline-none mt-1 font-mono" /></div>
+                        <div><label className="text-[10px] font-bold opacity-40 uppercase">Secret Key</label><input type="password" value={storageConfig.s3_secret_key || ''} onChange={e => handleStorageConfigChange({ s3_secret_key: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-primary outline-none mt-1 font-mono" /></div>
+                      </div>
+                    </div>
+                  )}
+
+                  {storageConfig.provider === 'webdav' && (
+                    <div className="space-y-3">
+                      <div><label className="text-[10px] font-bold opacity-40 uppercase">URL del servidor WebDAV</label><input value={storageConfig.webdav_url || ''} onChange={e => handleStorageConfigChange({ webdav_url: e.target.value })} placeholder="https://mi-nextcloud.com/remote.php/dav/files/usuario" className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-primary outline-none mt-1" /></div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div><label className="text-[10px] font-bold opacity-40 uppercase">Usuario</label><input value={storageConfig.webdav_username || ''} onChange={e => handleStorageConfigChange({ webdav_username: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-primary outline-none mt-1" /></div>
+                        <div><label className="text-[10px] font-bold opacity-40 uppercase">Contraseña</label><input type="password" value={storageConfig.webdav_password || ''} onChange={e => handleStorageConfigChange({ webdav_password: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-primary outline-none mt-1" /></div>
+                      </div>
+                    </div>
+                  )}
+
+                  {storageConfig.provider === 'gdrive' && (
+                    <div className="space-y-3">
+                      <div><label className="text-[10px] font-bold opacity-40 uppercase">Client ID (Google Cloud Console)</label><input value={storageConfig.gdrive_client_id || ''} onChange={e => handleStorageConfigChange({ gdrive_client_id: e.target.value })} placeholder="xxxx.apps.googleusercontent.com" className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-primary outline-none mt-1" /></div>
+                      <div><label className="text-[10px] font-bold opacity-40 uppercase">Client Secret</label><input type="password" value={storageConfig.gdrive_client_secret || ''} onChange={e => handleStorageConfigChange({ gdrive_client_secret: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-primary outline-none mt-1 font-mono" /></div>
+                      <div className="flex items-center gap-3">
+                        <Button onClick={handleGDriveAuth} disabled={gdriveAuthLoading || !storageConfig.gdrive_client_id || !storageConfig.gdrive_client_secret} className="gap-2">
+                          {gdriveAuthLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogIn className="w-4 h-4" />}
+                          {storageConfig.gdrive_refresh_token ? 'Reconectar con Google' : 'Conectar con Google'}
+                        </Button>
+                        {storageConfig.gdrive_refresh_token && <span className="text-xs text-green-400 flex items-center gap-1"><Check className="w-3 h-3" /> Conectado</span>}
+                      </div>
+                      <p className="text-[10px] opacity-30 flex items-center gap-1"><Info className="w-3 h-3" /> Necesitas crear un proyecto en Google Cloud Console con la API de Drive activada.</p>
+                    </div>
+                  )}
+
+                  {storageConfig.provider !== 'gdrive' && (
+                    <div><label className="text-[10px] font-bold opacity-40 uppercase">Prefijo de ruta (carpeta en el storage)</label><input value={storageConfig.path_prefix || ''} onChange={e => handleStorageConfigChange({ path_prefix: e.target.value })} placeholder="klioreader/" className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-primary outline-none mt-1 font-mono" /></div>
+                  )}
+
+                  <p className="text-[10px] opacity-30 flex items-center gap-1"><Info className="w-3 h-3" /> Las credenciales se guardan solo en este dispositivo. Nunca se envían a nuestros servidores.</p>
+                </Card>
+
+                <Card className="bg-white/5 border-white/5 p-6 space-y-5">
+                  <h3 className="text-sm font-bold uppercase tracking-widest opacity-50 flex items-center gap-2"><RefreshCw className="w-4 h-4" /> Sincronización</h3>
+                  <div className="flex items-center gap-3">
+                    <Button variant="outline" size="sm" className="border-white/10 gap-2" onClick={handleTestConnection} disabled={storageTesting || !isStorageConfigured}>
+                      {storageTesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wifi className="w-4 h-4" />} Probar Conexión
+                    </Button>
+                    {storageTestResult && (
+                      <span className={`text-xs flex items-center gap-1 ${storageTestResult.ok ? 'text-green-400' : 'text-red-400'}`}>
+                        {storageTestResult.ok ? <Check className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />} {storageTestResult.msg}
+                      </span>
+                    )}
+                  </div>
+                  <Separator className="opacity-10" />
+                  <div className="flex items-center gap-3">
+                    <Button onClick={handleSyncNow} disabled={syncingManual || !isStorageConfigured} className="gap-2">
+                      {syncingManual ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} Sincronizar Ahora
+                    </Button>
+                    {syncStatus.last_sync && <span className="text-xs opacity-40">Último sync: {new Date(syncStatus.last_sync).toLocaleString()}</span>}
+                  </div>
+                  <Separator className="opacity-10" />
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div><p className="text-sm font-bold">Auto-sync</p><p className="text-[10px] opacity-40">Sincronizar automáticamente cada cierto intervalo</p></div>
+                      <button onClick={handleToggleAutoSync} disabled={!isStorageConfigured} className={`relative w-11 h-6 rounded-full transition-colors ${storageConfig.auto_sync_enabled ? 'bg-primary' : 'bg-white/10'} ${!isStorageConfigured ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'}`}>
+                        <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${storageConfig.auto_sync_enabled ? 'translate-x-5' : ''}`} />
+                      </button>
+                    </div>
+                    {storageConfig.auto_sync_enabled && (
+                      <div>
+                        <label className="text-[10px] font-bold opacity-40 uppercase">Intervalo</label>
+                        <div className="flex gap-2 mt-1">
+                          {[{ label: '1 min', secs: 60 }, { label: '5 min', secs: 300 }, { label: '15 min', secs: 900 }, { label: '30 min', secs: 1800 }].map(opt => (
+                            <Button key={opt.secs} variant={(storageConfig.auto_sync_interval || 300) === opt.secs ? 'default' : 'secondary'} size="sm" className="text-xs" onClick={() => handleAutoSyncIntervalChange(opt.secs)}>{opt.label}</Button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  {syncStatus.error && (
+                    <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3"><p className="text-xs text-red-400 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> {syncStatus.error}</p></div>
+                  )}
+                </Card>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </ScrollArea>
+  );
+}

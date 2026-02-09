@@ -25,6 +25,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email = trim($_POST['email'] ?? '');
     $role = in_array($_POST['role'] ?? '', array('user', 'admin')) ? $_POST['role'] : 'user';
     $uploadLimit = (int)($_POST['upload_limit_mb'] ?? 500) * 1048576; // MB a bytes
+    $isSubscriber = isset($_POST['is_subscriber']) ? 1 : 0;
     $newPassword = $_POST['new_password'] ?? '';
 
     if (strlen($username) < 3 || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
@@ -35,11 +36,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         if ($newPassword && strlen($newPassword) >= 6) {
             $hash = password_hash($newPassword, PASSWORD_BCRYPT);
-            $stmt = $pdo->prepare('UPDATE users SET username = ?, email = ?, role = ?, upload_limit = ?, password_hash = ?, updated_at = datetime(\'now\') WHERE id = ?');
-            $stmt->execute(array($username, $email, $role, $uploadLimit, $hash, $userId));
+            $stmt = $pdo->prepare('UPDATE users SET username = ?, email = ?, role = ?, upload_limit = ?, is_subscriber = ?, password_hash = ?, updated_at = datetime(\'now\') WHERE id = ?');
+            $stmt->execute(array($username, $email, $role, $uploadLimit, $isSubscriber, $hash, $userId));
         } else {
-            $stmt = $pdo->prepare('UPDATE users SET username = ?, email = ?, role = ?, upload_limit = ?, updated_at = datetime(\'now\') WHERE id = ?');
-            $stmt->execute(array($username, $email, $role, $uploadLimit, $userId));
+            $stmt = $pdo->prepare('UPDATE users SET username = ?, email = ?, role = ?, upload_limit = ?, is_subscriber = ?, updated_at = datetime(\'now\') WHERE id = ?');
+            $stmt->execute(array($username, $email, $role, $uploadLimit, $isSubscriber, $userId));
         }
 
         flash('success', 'Usuario actualizado.');
@@ -98,6 +99,15 @@ require_once __DIR__ . '/../templates/admin-layout.php';
                         <input type="number" name="upload_limit_mb" min="0" step="1"
                             value="<?php echo round($uploadLimit / 1048576); ?>" class="form-input">
                     </div>
+                </div>
+
+                <div>
+                    <label class="flex items-center gap-3 cursor-pointer">
+                        <input type="checkbox" name="is_subscriber" value="1" <?php echo (int)$user['is_subscriber'] ? 'checked' : ''; ?>
+                            class="w-4 h-4 rounded border-white/20 bg-klio-elevated text-klio-primary focus:ring-klio-primary">
+                        <span class="form-label mb-0">Suscriptor Cloud</span>
+                        <span class="text-klio-muted text-xs">(muestra corona y acceso a KlioReader Cloud)</span>
+                    </label>
                 </div>
 
                 <div>

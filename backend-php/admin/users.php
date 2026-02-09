@@ -68,7 +68,7 @@ $total = (int)$stmt->fetchColumn();
 $totalPages = max(1, ceil($total / $perPage));
 
 // Usuarios
-$sql = "SELECT u.id, u.username, u.email, u.role, u.upload_limit, u.storage_used, u.xp, u.level, u.streak, u.created_at,
+$sql = "SELECT u.id, u.username, u.email, u.role, u.is_subscriber, u.upload_limit, u.storage_used, u.xp, u.level, u.streak, u.created_at,
         (SELECT COUNT(*) FROM books WHERE user_id = u.id) as book_count
         FROM users u $whereClause ORDER BY u.created_at DESC LIMIT $perPage OFFSET $offset";
 $stmt = $pdo->prepare($sql);
@@ -119,7 +119,12 @@ require_once __DIR__ . '/../templates/admin-layout.php';
             <tr>
                 <td class="text-klio-muted"><?php echo $u['id']; ?></td>
                 <td>
-                    <div class="font-medium"><?php echo e($u['username']); ?></div>
+                    <div class="font-medium">
+                        <?php echo e($u['username']); ?>
+                        <?php if ((int)$u['is_subscriber']): ?>
+                        <span class="text-amber-400 ml-1" title="Suscriptor Cloud">&#x1F451;</span>
+                        <?php endif; ?>
+                    </div>
                     <div class="text-klio-muted text-xs"><?php echo e($u['email']); ?></div>
                 </td>
                 <td>

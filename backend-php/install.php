@@ -136,6 +136,23 @@ if (empty($errors)) {
             }
             $checks[] = array('Migración 004 (título)', 'Aplicada', true);
         }
+
+        // Migración 007: is_subscriber en users
+        $migration007 = __DIR__ . '/migrations/007_add_subscriber.sql';
+        if (file_exists($migration007)) {
+            $cols = $pdo->query('PRAGMA table_info(users)')->fetchAll(PDO::FETCH_ASSOC);
+            $hasSubscriber = false;
+            foreach ($cols as $col) {
+                if ($col['name'] === 'is_subscriber') {
+                    $hasSubscriber = true;
+                    break;
+                }
+            }
+            if (!$hasSubscriber) {
+                $pdo->exec(file_get_contents($migration007));
+            }
+            $checks[] = array('Migración 007 (suscriptor)', 'Aplicada', true);
+        }
     } catch (Exception $e) {
         $errors[] = 'Error al crear la base de datos: ' . $e->getMessage();
         $checks[] = array('Base de datos SQLite', 'Error: ' . $e->getMessage(), false);
