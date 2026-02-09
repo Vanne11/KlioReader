@@ -8,6 +8,7 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import { useUIStore } from '@/stores/uiStore';
 import { statsFromApi, getUnlockedBadges } from '@/lib/gamification';
 import type { Book, CloudBook } from '@/types';
+import { detectBookType } from '@/lib/constants';
 
 // Ref to prevent re-enqueuing cloud data back to queue
 let cloudSyncingRef = false;
@@ -136,7 +137,7 @@ export function useCloudBooks() {
           description: saved?.description ?? meta.description ?? null,
           currentChapter: saved?.currentChapter || 0, progress: saved?.progress || 0,
           lastRead: saved?.lastRead || "Sin leer",
-          type: filePath.toLowerCase().endsWith('pdf') ? 'pdf' as const : 'epub' as const,
+          type: detectBookType(filePath),
         };
       });
       setBooks(scannedBooks);

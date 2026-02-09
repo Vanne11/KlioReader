@@ -13,66 +13,44 @@ import type { Book } from '@/types';
 
 export function useReader() {
   const {
-    currentBook, setCurrentBook, setSelectedBook, setEpubContent,
-    readView, setCurrentPageInChapter, numPages,
-    currentPageInChapter, totalPagesInChapter,
-    setShowNotesPanel,
+    currentBook, setCurrentBook, setSelectedBook,
+    numPages, foliateView,
+    setShowNotesPanel, setCurrentFraction,
   } = useReaderStore();
   const { setBooks } = useLibraryStore();
   const { cloudBooks } = useCloudStore();
   const { setStats } = useGamificationStore();
   const { setReaderNotes, setReaderBookmarks } = useNotesStore();
 
-  const pendingLastPageRef = useRef(false);
   const readerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
 
   async function readBook(book: Book) {
     setSelectedBook(null);
     setCurrentBook(book);
-    setCurrentPageInChapter(0);
     setShowNotesPanel(false);
     setReaderNotes([]);
     setReaderBookmarks([]);
+    setCurrentFraction(0);
     setStats(prev => updateStreak(prev));
-    if (book.type === 'epub') loadEpubChapter(book.path, book.currentChapter);
-  }
-
-  async function loadEpubChapter(path: string, index: number) {
-    try {
-      let content: string = await invoke("read_epub_chapter", { path, chapterIndex: index });
-      const bodyMatch = content.match(/<body[^>]*>([\s\S]*)<\/body>/i);
-      setEpubContent(bodyMatch ? bodyMatch[1] : content.replace(/<\/?(html|head)[^>]*>/gi, ''));
-      if (readerRef.current) readerRef.current.scrollTo(0, 0);
-    } catch (e) { console.error(e); }
   }
 
   async function changePage(delta: number) {
     if (!currentBook) return;
     const storageConfigured = useSettingsStore.getState().storageConfigured();
 
-    if (readView === 'paginated' && currentBook.type === 'epub') {
-      const maxPage = totalPagesInChapter - 1;
-      const newPage = currentPageInChapter + delta;
-
-      if (newPage >= 0 && newPage <= maxPage) {
-        setCurrentPageInChapter(newPage);
-        return;
+    if (currentBook.type !== 'pdf') {
+      if (foliateView) {
+        if (delta > 0) await foliateView.next();
+        else await foliateView.prev();
       }
-
-      if (delta < 0 && newPage < 0) {
-        pendingLastPageRef.current = true;
-      } else if (delta > 0 && newPage > maxPage) {
-        setCurrentPageInChapter(0);
-      }
+      return;
     }
 
+    // PDF navigation (unchanged)
     const newIndex = currentBook.currentChapter + delta;
-    const total = currentBook.type === 'pdf' ? (numPages || 1) : currentBook.total_chapters;
+    const total = numPages || 1;
     if (newIndex < 0 || newIndex >= total) return;
-
-    if (currentBook.type === 'epub') await loadEpubChapter(currentBook.path, newIndex);
 
     const newProgress = Math.round(((newIndex + 1) / total) * 100);
     const updated = { ...currentBook, currentChapter: newIndex, progress: newProgress, lastRead: "Ahora mismo" };
@@ -101,7 +79,58 @@ export function useReader() {
       invoke('user_storage_update_progress', {
         filename,
         chapter: newIndex,
-        page: currentPageInChapter,
+        page: newIndex,
+        percent: newProgress,
+      }).catch(() => {});
+    }
+  }
+
+  function handleRelocate(detail: { fraction: number; sectionIndex: number; sectionTotal: number; cfi?: string }) {
+    if (!currentBook || currentBook.type === 'pdf') return;
+    const storageConfigured = useSettingsStore.getState().storageConfigured();
+
+    const { fraction, sectionIndex, sectionTotal } = detail;
+    const prevChapter = currentBook.currentChapter;
+    const newProgress = Math.round(fraction * 100);
+
+    setCurrentFraction(fraction);
+
+    const updated = {
+      ...currentBook,
+      currentChapter: sectionIndex,
+      progress: newProgress,
+      total_chapters: sectionTotal,
+      lastRead: "Ahora mismo",
+    };
+    setCurrentBook(updated);
+    setBooks((prev: Book[]) => prev.map(b => b.id === updated.id ? updated : b));
+
+    if (sectionIndex > prevChapter) {
+      setStats(prev => addXP(prev, 10));
+    }
+
+    if (api.isLoggedIn()) {
+      const cloudMatch = cloudBooks.find(cb =>
+        cb.title.toLowerCase() === currentBook.title.toLowerCase() &&
+        cb.author.toLowerCase() === currentBook.author.toLowerCase()
+      );
+      syncQueue.enqueue('sync_progress', {
+        bookPath: currentBook.path,
+        bookTitle: currentBook.title,
+        bookAuthor: currentBook.author,
+        cloudBookId: cloudMatch?.id || null,
+        current_chapter: sectionIndex,
+        current_page: sectionIndex,
+        progress_percent: newProgress,
+      });
+    }
+
+    if (storageConfigured) {
+      const filename = currentBook.path.split('/').pop() || '';
+      invoke('user_storage_update_progress', {
+        filename,
+        chapter: sectionIndex,
+        page: 0,
         percent: newProgress,
       }).catch(() => {});
     }
@@ -113,7 +142,7 @@ export function useReader() {
   }
 
   return {
-    readBook, loadEpubChapter, changePage, toggleFullscreen,
-    pendingLastPageRef, readerRef, containerRef, contentRef,
+    readBook, changePage, handleRelocate, toggleFullscreen,
+    readerRef, containerRef,
   };
 }

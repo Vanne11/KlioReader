@@ -11,7 +11,6 @@ import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Document, Page, pdfjs } from 'react-pdf';
-import parse, { Element, HTMLReactParserOptions } from 'html-react-parser';
 import { useReaderStore } from '@/stores/readerStore';
 import { useNotesStore } from '@/stores/notesStore';
 import { useSocialStore } from '@/stores/socialStore';
@@ -20,14 +19,13 @@ import { useCloudStore } from '@/stores/cloudStore';
 import { useReader } from '@/hooks/useReader';
 import { useReaderNotes } from '@/hooks/useReaderNotes';
 import { useKeyboard } from '@/hooks/useKeyboard';
-import { useGestures } from '@/hooks/useGestures';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useSharedNotes } from '@/hooks/useSharedNotes';
 import { useVoiceNotes } from '@/hooks/useVoiceNotes';
-import { EpubImage } from '@/components/shared/EpubImage';
+import { FoliateReader } from '@/components/reader/FoliateReader';
 import { SharedNoteBubble } from '@/components/social/SharedNoteBubble';
 import { VoiceNoteRecorder } from '@/components/social/VoiceNoteRecorder';
-import { themeClasses, READER_FONTS } from '@/lib/constants';
+import { themeClasses, READER_FONTS, isComicType } from '@/lib/constants';
 import * as api from '@/lib/api';
 import { useT } from '@/i18n';
 
@@ -37,18 +35,17 @@ pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.vers
 export function ReaderView() {
   const { t } = useT();
   const {
-    currentBook, setCurrentBook, epubContent,
+    currentBook, setCurrentBook,
     fontSize, setFontSize, readerTheme, setReaderTheme,
     readView, setReadView, pageColumns, setPageColumns,
     readerFont, setReaderFont, numPages, setNumPages,
-    isFullscreen, currentPageInChapter, totalPagesInChapter,
-    setPageHeight, pageWidth, setPageWidth,
-    setCurrentPageInChapter, setTotalPagesInChapter,
+    isFullscreen,
     showNotesPanel, setShowNotesPanel,
+    setFoliateView,
   } = useReaderStore();
 
   const { readerNotes, readerBookmarks, newNoteContent, setNewNoteContent, newNoteColor, setNewNoteColor } = useNotesStore();
-  const { changePage, toggleFullscreen, readerRef, containerRef, contentRef, pendingLastPageRef } = useReader();
+  const { changePage, handleRelocate, toggleFullscreen, readerRef, containerRef } = useReader();
   const { addReaderNote, deleteReaderNote, addReaderBookmark, deleteReaderBookmark, loadReaderNotesAndBookmarks } = useReaderNotes();
 
   const profile = useAuthStore(s => s.profile);
@@ -58,7 +55,6 @@ export function ReaderView() {
   const voice = useVoiceNotes();
   const [showSharedNotes, setShowSharedNotes] = useState(false);
 
-  // Match current local book to its cloud counterpart (same pattern as useReaderNotes)
   const cloudBookId = useMemo(() => {
     if (!currentBook) return undefined;
     const cb = cloudBooks.find(c =>
@@ -71,81 +67,30 @@ export function ReaderView() {
   useKeyboard();
   const isMobile = useIsMobile();
 
-  const onSwipeLeft = useCallback(() => changePage(1), [changePage]);
-  const onSwipeRight = useCallback(() => changePage(-1), [changePage]);
-  useGestures({
-    ref: readerRef,
-    onSwipeLeft,
-    onSwipeRight,
-    enabled: readView === 'paginated' && currentBook?.type === 'epub',
-  });
-
   // Load notes when book changes
   useEffect(() => {
     if (currentBook && api.isLoggedIn()) loadReaderNotesAndBookmarks();
   }, [currentBook?.title]);
 
-  // Pagination calculation — CSS multi-column horizontal
+  const onFoliateRelocate = useCallback((detail: { fraction: number; sectionIndex: number; sectionTotal: number; cfi?: string }) => {
+    handleRelocate(detail);
+  }, [handleRelocate]);
+
+  const onFoliateReady = useCallback((view: any) => {
+    setFoliateView(view);
+  }, [setFoliateView]);
+
+  // Clear foliate view on unmount or book close
   useEffect(() => {
-    if (readView !== 'paginated' || !readerRef.current) {
-      setTotalPagesInChapter(1);
-      setCurrentPageInChapter(0);
-      return;
-    }
-    const recalc = () => {
-      const viewport = readerRef.current;
-      const content = contentRef.current;
-      if (!viewport || !content) return;
-
-      const vw = viewport.clientWidth;
-      const vh = viewport.clientHeight;
-
-      setPageHeight(vh);
-      setPageWidth(vw);
-
-      requestAnimationFrame(() => {
-        const totalWidth = content.scrollWidth;
-        const pages = Math.max(1, Math.round(totalWidth / vw));
-        setTotalPagesInChapter(pages);
-        if (pendingLastPageRef.current) {
-          pendingLastPageRef.current = false;
-          setCurrentPageInChapter(pages - 1);
-        } else {
-          setCurrentPageInChapter(prev => Math.min(prev, pages - 1));
-        }
-      });
-    };
-    // Small delay to let CSS multi-column layout settle
-    const timer = setTimeout(recalc, 50);
-    const ro = new ResizeObserver(recalc);
-    ro.observe(readerRef.current);
-    return () => { clearTimeout(timer); ro.disconnect(); };
-  }, [readView, epubContent, fontSize, readerFont, pageColumns]);
-
-  const findSvgImage = (node: any): string | null => {
-    if (node instanceof Element) {
-      if (node.name === 'image') return node.attribs.href || node.attribs['xlink:href'] || null;
-      if (node.children) for (const child of node.children) { const r = findSvgImage(child); if (r) return r; }
-    }
-    return null;
-  };
-
-  const parserOptions: HTMLReactParserOptions = useMemo(() => ({
-    replace: (domNode) => {
-      if (domNode instanceof Element) {
-        if (domNode.name === 'img') return <EpubImage src={domNode.attribs.src} bookPath={currentBook?.path || ""} />;
-        if (domNode.name === 'svg') {
-          const imgSrc = findSvgImage(domNode);
-          if (imgSrc) return <EpubImage src={imgSrc} bookPath={currentBook?.path || ""} />;
-        }
-        if (['html', 'body', 'head', 'script', 'style', 'link', 'title'].includes(domNode.name)) return <></>;
-      }
-    },
-  }), [currentBook?.path]);
+    if (!currentBook) setFoliateView(null);
+  }, [currentBook]);
 
   if (!currentBook) return null;
 
   const scale = 1.0;
+  const isPdf = currentBook.type === 'pdf';
+  const isComic = isComicType(currentBook.type);
+  const usesFoliate = !isPdf; // epub, cbz, cbr all use foliate-js
 
   return (
     <div ref={containerRef} className={`flex flex-col h-screen ${themeClasses[readerTheme]} transition-colors duration-300`} style={{ paddingTop: 'var(--sat)', paddingBottom: 'var(--sab)' }}>
@@ -203,18 +148,20 @@ export function ReaderView() {
                 <Button variant="ghost" size="icon" className={`h-8 w-8 md:h-9 md:w-9 rounded-full ${showNotesPanel ? 'bg-primary/30 text-primary' : 'bg-black/20'}`} onClick={() => setShowNotesPanel(p => !p)}><StickyNote className="w-4 h-4 md:w-5 md:h-5" /></Button>
               </TooltipTrigger><TooltipContent>{t('reader.notes')}</TooltipContent></Tooltip>
               <Tooltip><TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className={`h-8 w-8 md:h-9 md:w-9 rounded-full ${readerBookmarks.some(b => b.chapter_index === currentBook.currentChapter && b.page_index === currentPageInChapter) ? 'bg-amber-500/30 text-amber-400' : 'bg-black/20'}`} onClick={addReaderBookmark}><BookmarkIcon className="w-4 h-4 md:w-5 md:h-5" /></Button>
+                <Button variant="ghost" size="icon" className={`h-8 w-8 md:h-9 md:w-9 rounded-full ${readerBookmarks.some(b => b.chapter_index === currentBook.currentChapter) ? 'bg-amber-500/30 text-amber-400' : 'bg-black/20'}`} onClick={addReaderBookmark}><BookmarkIcon className="w-4 h-4 md:w-5 md:h-5" /></Button>
               </TooltipTrigger><TooltipContent>{t('reader.bookmarkPage')}</TooltipContent></Tooltip>
             </>
           )}
           <Separator orientation="vertical" className="h-6 opacity-10 mx-1 md:mx-2 hidden md:block" />
           <div className="flex items-center gap-1 md:gap-2">
-            <Button variant="ghost" size="icon" className="md:hidden h-8 w-8" onClick={() => changePage(-1)} disabled={currentBook.currentChapter === 0 && currentPageInChapter === 0}><ChevronLeft className="w-4 h-4" /></Button>
-            <Button variant="ghost" size="sm" className="hidden md:inline-flex" onClick={() => changePage(-1)} disabled={currentBook.currentChapter === 0 && currentPageInChapter === 0}>{t('reader.previous')}</Button>
+            <Button variant="ghost" size="icon" className="md:hidden h-8 w-8" onClick={() => changePage(-1)} disabled={currentBook.currentChapter === 0 && currentBook.progress === 0}><ChevronLeft className="w-4 h-4" /></Button>
+            <Button variant="ghost" size="sm" className="hidden md:inline-flex" onClick={() => changePage(-1)} disabled={currentBook.currentChapter === 0 && currentBook.progress === 0}>{t('reader.previous')}</Button>
             <div className="text-[9px] md:text-[10px] font-bold px-2 md:px-3 py-1 bg-primary/10 rounded whitespace-nowrap">
-              {readView === 'paginated' && currentBook.type === 'epub'
-                ? (isMobile ? `${currentPageInChapter + 1}/${totalPagesInChapter}` : `${t('reader.page')} ${currentPageInChapter + 1}/${totalPagesInChapter} · ${t('reader.chapter')} ${currentBook.currentChapter + 1}/${currentBook.total_chapters}`)
-                : `${currentBook.currentChapter + 1} / ${currentBook.type === 'pdf' ? numPages : currentBook.total_chapters}`}
+              {isPdf
+                ? `${currentBook.currentChapter + 1} / ${numPages}`
+                : isComic
+                  ? `${currentBook.currentChapter + 1} / ${currentBook.total_chapters}`
+                  : `${currentBook.progress}% · ${t('reader.chapter')} ${currentBook.currentChapter + 1}/${currentBook.total_chapters}`}
             </div>
             <Button variant="ghost" size="icon" className="md:hidden h-8 w-8" onClick={() => changePage(1)}><ChevronRight className="w-4 h-4" /></Button>
             <Button variant="ghost" size="sm" className="hidden md:inline-flex" onClick={() => changePage(1)}>{t('reader.next')}</Button>
@@ -225,41 +172,31 @@ export function ReaderView() {
       </header>
 
       <div className="flex-1 flex overflow-hidden">
-        <div ref={readerRef} className={`flex-1 ${readView === 'paginated' ? 'overflow-hidden' : 'overflow-y-auto overflow-x-hidden no-scrollbar'}`}>
-          {readView === 'paginated' && currentBook.type === 'epub' ? (
-            <div
-              ref={contentRef}
-              key={currentBook.id + '-' + currentBook.currentChapter + '-' + fontSize + '-' + pageColumns}
-              className="epub-paginated h-full font-serif selection:bg-primary/30 break-words"
-              style={{
-                fontSize: `${fontSize}px`,
-                lineHeight: '1.8',
-                fontFamily: readerFont,
-                columnWidth: pageWidth > 0 ? `${pageWidth / pageColumns}px` : '100vw',
-                height: '100%',
-                padding: isMobile ? '1.5rem 1rem' : '3rem',
-                boxSizing: 'border-box',
-                transform: `translateX(-${currentPageInChapter * (pageWidth || 0)}px)`,
-                transition: 'transform 0.3s ease',
-              }}
-            >
-              <div className="epub-reader-content">{parse(epubContent, parserOptions)}</div>
-            </div>
+        <div ref={readerRef} className="flex-1 overflow-hidden">
+          {usesFoliate ? (
+            <FoliateReader
+              bookPath={currentBook.path}
+              bookType={currentBook.type}
+              flow={readView}
+              fontSize={fontSize}
+              fontFamily={readerFont}
+              theme={readerTheme}
+              pageColumns={pageColumns}
+              initialSection={currentBook.currentChapter}
+              onRelocate={onFoliateRelocate}
+              onReady={onFoliateReady}
+            />
           ) : (
             <div
               key={currentBook.id + '-' + currentBook.currentChapter + '-' + readView + '-' + fontSize}
-              className="mx-auto py-6 px-4 md:py-12 md:px-12 font-serif selection:bg-primary/30 break-words max-w-full md:max-w-2xl"
+              className="mx-auto py-6 px-4 md:py-12 md:px-12 font-serif selection:bg-primary/30 break-words max-w-full md:max-w-2xl overflow-y-auto h-full"
               style={{ fontSize: `${fontSize}px`, lineHeight: '1.8', fontFamily: readerFont }}
             >
-              {currentBook.type === 'epub' ? (
-                <div className="epub-reader-content">{parse(epubContent, parserOptions)}</div>
-              ) : (
-                <div className="flex justify-center">
-                  <Document file={convertFileSrc(currentBook.path)} onLoadSuccess={({ numPages }) => setNumPages(numPages)}>
-                    <Page pageNumber={currentBook.currentChapter + 1} scale={scale} renderAnnotationLayer={false} renderTextLayer={true} className="shadow-2xl" />
-                  </Document>
-                </div>
-              )}
+              <div className="flex justify-center">
+                <Document file={convertFileSrc(currentBook.path)} onLoadSuccess={({ numPages }) => setNumPages(numPages)}>
+                  <Page pageNumber={currentBook.currentChapter + 1} scale={scale} renderAnnotationLayer={false} renderTextLayer={true} className="shadow-2xl" />
+                </Document>
+              </div>
             </div>
           )}
         </div>

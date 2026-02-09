@@ -1,4 +1,18 @@
-import type { UserStorageConfig, ReaderFont } from '@/types';
+import type { UserStorageConfig, ReaderFont, Book } from '@/types';
+
+export function detectBookType(filePath: string): Book['type'] {
+  const ext = filePath.toLowerCase().split('.').pop();
+  switch (ext) {
+    case 'pdf': return 'pdf';
+    case 'cbz': return 'cbz';
+    case 'cbr': return 'cbr';
+    default: return 'epub';
+  }
+}
+
+export function isComicType(type: Book['type']): boolean {
+  return type === 'cbz' || type === 'cbr';
+}
 
 export const DEFAULT_STORAGE_CONFIG: UserStorageConfig = {
   provider: 's3',

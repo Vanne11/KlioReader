@@ -2,6 +2,7 @@ mod storage;
 
 use serde::{Serialize, Deserialize};
 use std::path::Path;
+use std::io::{Read as IoRead, Write as IoWrite, Cursor};
 use tauri::Manager;
 use std::sync::Arc;
 use epub::doc::EpubDoc;
@@ -9,6 +10,8 @@ use lopdf::Document;
 use base64::{Engine as _, engine::general_purpose};
 use storage::commands::SyncEngineState;
 use storage::sync_engine::SyncEngine;
+
+const IMAGE_EXTS: &[&str] = &[".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg", ".jxl", ".avif"];
 
 #[derive(Serialize, Deserialize, Clone)]
 struct BookMetadata {
@@ -88,16 +91,6 @@ fn read_pdf_metadata(path: &Path) -> Result<BookMetadata, String> {
 }
 
 #[tauri::command]
-fn read_epub_chapter(path: String, chapter_index: usize) -> Result<String, String> {
-    let mut doc = EpubDoc::new(path).map_err(|e| e.to_string())?;
-    if chapter_index >= doc.get_num_chapters() {
-        return Err("Chapter index out of bounds".to_string());
-    }
-    doc.set_current_chapter(chapter_index);
-    doc.get_current_str().map(|(content, _mime)| content).ok_or_else(|| "Failed to get chapter content".to_string())
-}
-
-#[tauri::command]
 fn read_epub_resource(path: String, resource_path: String) -> Result<(Vec<u8>, String), String> {
     let mut doc = EpubDoc::new(path).map_err(|e| e.to_string())?;
 
@@ -143,6 +136,163 @@ fn read_epub_resource(path: String, resource_path: String) -> Result<(Vec<u8>, S
     Err(format!("Resource not found: {}", resource_path))
 }
 
+fn is_image_file(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    IMAGE_EXTS.iter().any(|ext| lower.ends_with(ext))
+}
+
+fn read_cbz_metadata(path: &Path) -> Result<BookMetadata, String> {
+    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+
+    let mut image_names: Vec<String> = (0..archive.len())
+        .filter_map(|i| archive.by_index(i).ok().map(|f| f.name().to_string()))
+        .filter(|name| is_image_file(name))
+        .collect();
+    image_names.sort();
+
+    let total_chapters = image_names.len();
+    let title = path.file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "Comic".to_string());
+
+    // Extraer primera imagen como portada
+    let cover = if let Some(first) = image_names.first() {
+        if let Ok(mut entry) = archive.by_name(first) {
+            let mut buf = Vec::new();
+            if entry.read_to_end(&mut buf).is_ok() {
+                Some(general_purpose::STANDARD.encode(&buf))
+            } else { None }
+        } else { None }
+    } else { None };
+
+    Ok(BookMetadata {
+        title,
+        author: "Unknown".to_string(),
+        cover,
+        description: Some(format!("{} páginas", total_chapters)),
+        publisher: None,
+        language: None,
+        date: None,
+        subject: Some("Comic".to_string()),
+        total_chapters,
+    })
+}
+
+fn read_cbr_metadata(path: &Path) -> Result<BookMetadata, String> {
+    let archive = unrar::Archive::new(path).open_for_listing()
+        .map_err(|e| format!("Error abriendo CBR: {}", e))?;
+
+    let mut image_names: Vec<String> = Vec::new();
+    for entry in archive {
+        if let Ok(entry) = entry {
+            let name = entry.filename.to_string_lossy().to_string();
+            if entry.is_file() && is_image_file(&name) {
+                image_names.push(name);
+            }
+        }
+    }
+    image_names.sort();
+
+    let total_chapters = image_names.len();
+    let title = path.file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "Comic".to_string());
+
+    // Extraer primera imagen como portada
+    let cover = if let Some(first_name) = image_names.first() {
+        let first_clone = first_name.clone();
+        extract_first_rar_image(path, &first_clone)
+            .map(|data| general_purpose::STANDARD.encode(&data))
+    } else { None };
+
+    Ok(BookMetadata {
+        title,
+        author: "Unknown".to_string(),
+        cover,
+        description: Some(format!("{} páginas", total_chapters)),
+        publisher: None,
+        language: None,
+        date: None,
+        subject: Some("Comic".to_string()),
+        total_chapters,
+    })
+}
+
+fn extract_first_rar_image(path: &Path, target_name: &str) -> Option<Vec<u8>> {
+    let archive = unrar::Archive::new(path).open_for_processing().ok()?;
+    let mut cursor = archive;
+    loop {
+        match cursor.read_header() {
+            Ok(Some(header)) => {
+                let name = header.entry().filename.to_string_lossy().to_string();
+                if name == target_name {
+                    return header.read().ok().map(|(data, _)| data);
+                }
+                cursor = header.skip().ok()?;
+            }
+            _ => return None,
+        }
+    }
+}
+
+#[tauri::command]
+fn convert_cbr_to_cbz(path: String) -> Result<Vec<u8>, String> {
+    let archive = unrar::Archive::new(&path).open_for_processing()
+        .map_err(|e| format!("Error abriendo CBR: {}", e))?;
+
+    // Extraer todas las imágenes del RAR
+    let mut images: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut cursor = archive;
+
+    loop {
+        match cursor.read_header() {
+            Ok(Some(header)) => {
+                let name = header.entry().filename.to_string_lossy().to_string();
+                let is_file = header.entry().is_file();
+
+                if is_file && is_image_file(&name) {
+                    match header.read() {
+                        Ok((data, next)) => {
+                            images.push((name, data));
+                            cursor = next;
+                        }
+                        Err(e) => return Err(format!("Error leyendo entrada RAR: {}", e)),
+                    }
+                } else {
+                    match header.skip() {
+                        Ok(next) => cursor = next,
+                        Err(e) => return Err(format!("Error saltando entrada RAR: {}", e)),
+                    }
+                }
+            }
+            Ok(None) => break,
+            Err(e) => return Err(format!("Error leyendo header RAR: {}", e)),
+        }
+    }
+
+    images.sort_by(|a, b| a.0.cmp(&b.0));
+
+    // Crear ZIP en memoria
+    let mut buf = Cursor::new(Vec::new());
+    {
+        let mut zip_writer = zip::ZipWriter::new(&mut buf);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+
+        for (name, data) in &images {
+            zip_writer.start_file(name.as_str(), options)
+                .map_err(|e| format!("Error creando entrada ZIP: {}", e))?;
+            zip_writer.write_all(data)
+                .map_err(|e| format!("Error escribiendo en ZIP: {}", e))?;
+        }
+
+        zip_writer.finish().map_err(|e| format!("Error finalizando ZIP: {}", e))?;
+    }
+
+    Ok(buf.into_inner())
+}
+
 #[tauri::command]
 fn get_metadata(path: String) -> Result<BookMetadata, String> {
     let path = Path::new(&path);
@@ -150,6 +300,8 @@ fn get_metadata(path: String) -> Result<BookMetadata, String> {
     match extension.to_lowercase().as_str() {
         "epub" => read_epub_metadata(path),
         "pdf" => read_pdf_metadata(path),
+        "cbz" => read_cbz_metadata(path),
+        "cbr" => read_cbr_metadata(path),
         _ => Err("Unsupported format".to_string()),
     }
 }
@@ -164,7 +316,7 @@ fn scan_directory(dir_path: String) -> Result<Vec<(String, BookMetadata)>, Strin
             let file_path = entry.path();
             if file_path.is_file() {
                 let ext = file_path.extension().and_then(|s| s.to_str()).unwrap_or("");
-                if ext == "epub" || ext == "pdf" {
+                if matches!(ext, "epub" | "pdf" | "cbz" | "cbr") {
                     if let Ok(meta) = get_metadata(file_path.to_string_lossy().to_string()) {
                         books.push((file_path.to_string_lossy().to_string(), meta));
                     }
@@ -246,12 +398,12 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             get_metadata,
-            read_epub_chapter,
             scan_directory,
             get_random_snippet,
             is_mobile_platform,
             get_default_library_path,
             read_epub_resource,
+            convert_cbr_to_cbz,
             read_file_bytes,
             save_file_bytes,
             copy_file,

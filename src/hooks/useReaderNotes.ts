@@ -5,7 +5,7 @@ import { useNotesStore } from '@/stores/notesStore';
 import { useUIStore } from '@/stores/uiStore';
 
 export function useReaderNotes() {
-  const { currentBook, currentPageInChapter, readView } = useReaderStore();
+  const { currentBook } = useReaderStore();
   const { cloudBooks } = useCloudStore();
   const { setReaderNotes, setReaderBookmarks, readerBookmarks, newNoteContent, newNoteColor, setNewNoteContent } = useNotesStore();
   const { showAlert } = useUIStore();
@@ -66,23 +66,24 @@ export function useReaderNotes() {
     if (!currentBook) return;
     const cloud = getCloudBookForCurrent();
     if (!cloud) { showAlert('info', 'Sin conexión', 'Sube este libro a la nube para guardar marcadores'); return; }
+    // For EPUBs, only compare by chapter_index (foliate-js doesn't expose discrete pages)
     const exists = readerBookmarks.find(b =>
-      b.chapter_index === currentBook.currentChapter && b.page_index === currentPageInChapter
+      b.chapter_index === currentBook.currentChapter
     );
     if (exists) {
       await deleteReaderBookmark(exists.id);
       return;
     }
     try {
-      const label = `Cap. ${currentBook.currentChapter + 1}` + (readView === 'paginated' ? `, Pág. ${currentPageInChapter + 1}` : '');
+      const label = `Cap. ${currentBook.currentChapter + 1}`;
       const { id } = await api.addBookmark(cloud.id, {
         chapter_index: currentBook.currentChapter,
-        page_index: currentPageInChapter,
+        page_index: 0,
         label,
       });
       setReaderBookmarks(prev => [...prev, {
         id, book_id: cloud.id, chapter_index: currentBook.currentChapter,
-        page_index: currentPageInChapter, label, created_at: new Date().toISOString(),
+        page_index: 0, label, created_at: new Date().toISOString(),
       }]);
     } catch (err: any) {
       showAlert('error', 'Error', err.message || 'No se pudo guardar el marcador');

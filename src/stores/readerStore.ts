@@ -4,7 +4,6 @@ import type { Book, ReaderTheme, ReadView, ReaderFont } from '@/types';
 interface ReaderState {
   currentBook: Book | null;
   selectedBook: Book | null;
-  epubContent: string;
   fontSize: number;
   readerTheme: ReaderTheme;
   readView: ReadView;
@@ -12,15 +11,12 @@ interface ReaderState {
   readerFont: ReaderFont;
   numPages: number | null;
   isFullscreen: boolean;
-  currentPageInChapter: number;
-  totalPagesInChapter: number;
-  pageHeight: number;
-  pageWidth: number;
   showNotesPanel: boolean;
+  foliateView: any | null;
+  currentFraction: number;
 
   setCurrentBook: (book: Book | null) => void;
   setSelectedBook: (book: Book | null) => void;
-  setEpubContent: (content: string) => void;
   setFontSize: (size: number | ((prev: number) => number)) => void;
   setReaderTheme: (theme: ReaderTheme) => void;
   setReadView: (view: ReadView) => void;
@@ -28,17 +24,14 @@ interface ReaderState {
   setReaderFont: (font: ReaderFont) => void;
   setNumPages: (pages: number | null) => void;
   setIsFullscreen: (fullscreen: boolean) => void;
-  setCurrentPageInChapter: (page: number | ((prev: number) => number)) => void;
-  setTotalPagesInChapter: (pages: number) => void;
-  setPageHeight: (height: number) => void;
-  setPageWidth: (width: number) => void;
   setShowNotesPanel: (show: boolean | ((prev: boolean) => boolean)) => void;
+  setFoliateView: (view: any | null) => void;
+  setCurrentFraction: (fraction: number) => void;
 }
 
 export const useReaderStore = create<ReaderState>()((set) => ({
   currentBook: null,
   selectedBook: null,
-  epubContent: '',
   fontSize: Number(localStorage.getItem("readerFontSize")) || 18,
   readerTheme: (localStorage.getItem("readerTheme") as ReaderTheme) || 'dark',
   readView: (localStorage.getItem("readView") as ReadView) || 'scroll',
@@ -46,15 +39,12 @@ export const useReaderStore = create<ReaderState>()((set) => ({
   readerFont: (localStorage.getItem("readerFont") as ReaderFont) || 'Libre Baskerville',
   numPages: null,
   isFullscreen: false,
-  currentPageInChapter: 0,
-  totalPagesInChapter: 1,
-  pageHeight: 0,
-  pageWidth: 0,
   showNotesPanel: false,
+  foliateView: null,
+  currentFraction: 0,
 
   setCurrentBook: (book) => set({ currentBook: book }),
   setSelectedBook: (book) => set({ selectedBook: book }),
-  setEpubContent: (content) => set({ epubContent: content }),
   setFontSize: (sizeOrFn) => set((s) => ({
     fontSize: typeof sizeOrFn === 'function' ? sizeOrFn(s.fontSize) : sizeOrFn,
   })),
@@ -64,13 +54,9 @@ export const useReaderStore = create<ReaderState>()((set) => ({
   setReaderFont: (font) => set({ readerFont: font }),
   setNumPages: (pages) => set({ numPages: pages }),
   setIsFullscreen: (fullscreen) => set({ isFullscreen: fullscreen }),
-  setCurrentPageInChapter: (pageOrFn) => set((s) => ({
-    currentPageInChapter: typeof pageOrFn === 'function' ? pageOrFn(s.currentPageInChapter) : pageOrFn,
-  })),
-  setTotalPagesInChapter: (pages) => set({ totalPagesInChapter: pages }),
-  setPageHeight: (height) => set({ pageHeight: height }),
-  setPageWidth: (width) => set({ pageWidth: width }),
   setShowNotesPanel: (showOrFn) => set((s) => ({
     showNotesPanel: typeof showOrFn === 'function' ? showOrFn(s.showNotesPanel) : showOrFn,
   })),
+  setFoliateView: (view) => set({ foliateView: view }),
+  setCurrentFraction: (fraction) => set({ currentFraction: fraction }),
 }));

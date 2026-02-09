@@ -80,7 +80,7 @@ export function BookDetailView() {
               </div>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-8">
                 <div className="space-y-1"><p className="text-[10px] font-black opacity-30 uppercase tracking-widest">{t('bookDetail.format')}</p><p className="text-lg font-bold uppercase">{selectedBook.type}</p></div>
-                <div className="space-y-1"><p className="text-[10px] font-black opacity-30 uppercase tracking-widest">{t('bookDetail.extension')}</p><p className="text-lg font-bold">{selectedBook.total_chapters} {selectedBook.type === 'pdf' ? t('bookDetail.pages') : t('bookDetail.chapters')}</p></div>
+                <div className="space-y-1"><p className="text-[10px] font-black opacity-30 uppercase tracking-widest">{t('bookDetail.extension')}</p><p className="text-lg font-bold">{selectedBook.total_chapters} {selectedBook.type === 'pdf' || selectedBook.type === 'cbz' || selectedBook.type === 'cbr' ? t('bookDetail.pages') : t('bookDetail.chapters')}</p></div>
                 <div className="space-y-1"><p className="text-[10px] font-black opacity-30 uppercase tracking-widest">{t('bookDetail.lastTime')}</p><p className="text-lg font-bold truncate">{selectedBook.lastRead}</p></div>
               </div>
               <Separator className="opacity-10" />

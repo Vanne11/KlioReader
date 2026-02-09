@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useLibraryStore } from '@/stores/libraryStore';
 import type { Book, BookMetadata } from '@/types';
+import { detectBookType } from '@/lib/constants';
 
 export function useLibrary() {
   const {
@@ -27,7 +28,7 @@ export function useLibrary() {
           currentChapter: saved?.currentChapter || 0,
           progress: saved?.progress || 0,
           lastRead: saved?.lastRead || "Sin leer",
-          type: filePath.toLowerCase().endsWith('pdf') ? 'pdf' as const : 'epub' as const,
+          type: detectBookType(filePath),
         };
       });
       setBooks(scannedBooks);

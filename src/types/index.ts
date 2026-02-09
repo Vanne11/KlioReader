@@ -15,7 +15,7 @@ export interface Book extends BookMetadata {
   currentChapter: number;
   lastRead: string;
   path: string;
-  type: 'epub' | 'pdf';
+  type: 'epub' | 'pdf' | 'cbz' | 'cbr';
 }
 
 export type LibraryView = 'grid-large' | 'grid-mini' | 'grid-card' | 'list-info';

@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useLibraryStore } from '@/stores/libraryStore';
 import { useUIStore } from '@/stores/uiStore';
-import { saveStorageConfig, buildInvokeConfig } from '@/lib/constants';
+import { saveStorageConfig, buildInvokeConfig, detectBookType } from '@/lib/constants';
 import type { UserStorageConfig, SyncStatus } from '@/types';
 
 export function useStorageSync() {
@@ -80,7 +80,7 @@ export function useStorageSync() {
             description: saved?.description ?? meta.description ?? null,
             currentChapter: saved?.currentChapter || 0, progress: saved?.progress || 0,
             lastRead: saved?.lastRead || "Sin leer",
-            type: filePath.toLowerCase().endsWith('pdf') ? 'pdf' as const : 'epub' as const,
+            type: detectBookType(filePath),
           };
         });
         useLibraryStore.getState().setBooks(scannedBooks);
@@ -167,7 +167,7 @@ export function useSyncEvents() {
               description: saved?.description ?? meta.description ?? null,
               currentChapter: saved?.currentChapter || 0, progress: saved?.progress || 0,
               lastRead: saved?.lastRead || "Sin leer",
-              type: filePath.toLowerCase().endsWith('pdf') ? 'pdf' as const : 'epub' as const,
+              type: detectBookType(filePath),
             };
           });
           useLibraryStore.getState().setBooks(scannedBooks);
