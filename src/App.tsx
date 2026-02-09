@@ -8,7 +8,7 @@ import {
   LayoutGrid, Grid2X2, List, Settings2,
   Cloud, CloudUpload, CloudDownload, LogIn, LogOut, User, Loader2, Server, Trash2, Pencil,
   Play, ChevronLeft, AlertTriangle, CheckCircle2, Info,
-  StickyNote, BookmarkPlus, Bookmark as BookmarkIcon, Plus, MessageSquare
+  StickyNote, Bookmark as BookmarkIcon, Plus, MessageSquare
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
