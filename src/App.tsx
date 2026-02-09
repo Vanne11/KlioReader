@@ -406,10 +406,9 @@ function App() {
     if (!api.isLoggedIn()) return;
     setCloudLoading(true);
     try {
-      const [cloudBooksList, cloudStats, cloudProfile] = await Promise.all([
+      const [cloudBooksList, cloudStats] = await Promise.all([
         api.listBooks(),
         api.getStats().catch(() => null),
-        api.getProfile().catch(() => null),
       ]);
       setCloudBooks(cloudBooksList);
       setCloudBooksReady(true);
@@ -428,9 +427,9 @@ function App() {
         localStorage.setItem('klioUnlockedBadges', JSON.stringify(merged));
         setStats(prev => remote.xp >= prev.xp ? remote : prev);
       }
-      // Sync selected title from cloud
-      if (cloudProfile?.selected_title_id) {
-        setSelectedTitleId(cloudProfile.selected_title_id);
+      // Sync selected title from cloud (viene en stats)
+      if (cloudStats?.selected_title_id) {
+        setSelectedTitleId(cloudStats.selected_title_id);
       }
       // Reset flag after React processes the state updates
       setTimeout(() => { cloudSyncingRef.current = false; }, 0);

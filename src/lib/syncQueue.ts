@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 const STORAGE_KEY = "klio_sync_queue";
 const MAX_RETRIES = 5;
-const PROCESS_INTERVAL = 30_000; // 30s
+const PROCESS_INTERVAL = 5_000; // 5s
 
 export type SyncOpType = "upload_book" | "sync_progress" | "sync_stats" | "sync_title";
 
@@ -85,6 +85,8 @@ export function enqueue(type: SyncOpType, payload: any) {
   queue = deduplicate(queue, op);
   queue.push(op);
   saveQueue(queue);
+  // Procesar inmediatamente en vez de esperar el próximo tick
+  if (_intervalId) processQueue();
 }
 
 export function getQueueCount(): number {
@@ -102,24 +104,6 @@ export function getQueueSummary(): string {
   };
   // Show the first (currently processing) operation
   return labels[queue[0].type] || 'Sincronizando...';
-}
-
-// ── Conectividad ──
-async function isOnline(): Promise<boolean> {
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
-    const url = api.getApiUrl();
-    const res = await fetch(`${url}/api/`, { signal: controller.signal });
-    clearTimeout(timeout);
-    if (!res.ok) {
-      console.warn(`[SyncQueue] Health check falló: ${res.status} ${res.statusText}`);
-    }
-    return res.ok;
-  } catch (err: any) {
-    console.warn(`[SyncQueue] Sin conexión al servidor:`, err?.message || err);
-    return false;
-  }
 }
 
 // ── Procesamiento ──
@@ -199,37 +183,35 @@ export async function processQueue() {
 
   _processing = true;
   try {
-    const online = await isOnline();
-    if (!online) {
-      console.log(`[SyncQueue] Offline — ${loadQueue().length} operación(es) esperando`);
-      return;
-    }
-
     let queue = loadQueue();
     if (queue.length === 0) return;
 
-    // Procesar una a la vez
-    const op = queue[0];
-    console.log(`[SyncQueue] Procesando: ${op.type}`, op.payload.bookPath || op.payload.bookTitle || '');
-    try {
-      const ok = await processOne(op);
-      if (ok) {
-        console.log(`[SyncQueue] ✓ ${op.type} completado`);
-        queue = loadQueue(); // Re-leer por si cambió durante el proceso
-        queue = queue.filter(q => q.id !== op.id);
-        saveQueue(queue);
-      }
-    } catch (err: any) {
-      console.warn(`[SyncQueue] Error procesando ${op.type} (intento ${op.retries + 1}/${MAX_RETRIES}):`, err?.message || err, '\nPayload:', JSON.stringify(op.payload).substring(0, 200));
-      queue = loadQueue();
-      const idx = queue.findIndex(q => q.id === op.id);
-      if (idx !== -1) {
-        queue[idx].retries++;
-        if (queue[idx].retries >= MAX_RETRIES) {
-          console.warn(`[SyncQueue] Descartando ${op.type} tras ${MAX_RETRIES} reintentos`);
-          queue.splice(idx, 1);
+    // Procesar todos los items pendientes
+    const snapshot = [...queue];
+    for (const op of snapshot) {
+      console.log(`[SyncQueue] Procesando: ${op.type}`, op.payload.bookPath || op.payload.bookTitle || '');
+      try {
+        const ok = await processOne(op);
+        if (ok) {
+          console.log(`[SyncQueue] ✓ ${op.type} completado`);
+          queue = loadQueue();
+          queue = queue.filter(q => q.id !== op.id);
+          saveQueue(queue);
         }
-        saveQueue(queue);
+      } catch (err: any) {
+        console.warn(`[SyncQueue] Error procesando ${op.type} (intento ${op.retries + 1}/${MAX_RETRIES}):`, err?.message || err, '\nPayload:', JSON.stringify(op.payload).substring(0, 200));
+        queue = loadQueue();
+        const idx = queue.findIndex(q => q.id === op.id);
+        if (idx !== -1) {
+          queue[idx].retries++;
+          if (queue[idx].retries >= MAX_RETRIES) {
+            console.warn(`[SyncQueue] Descartando ${op.type} tras ${MAX_RETRIES} reintentos`);
+            queue.splice(idx, 1);
+          }
+          saveQueue(queue);
+        }
+        // Si falla una operación de red, no seguir intentando las demás
+        break;
       }
     }
   } finally {

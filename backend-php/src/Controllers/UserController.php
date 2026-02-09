@@ -93,7 +93,7 @@ class UserController
     public function stats($params)
     {
         $db = Database::get();
-        $stmt = $db->prepare('SELECT xp, level, streak, last_streak_date FROM users WHERE id = ?');
+        $stmt = $db->prepare('SELECT xp, level, streak, last_streak_date, selected_title_id FROM users WHERE id = ?');
         $stmt->execute(array($params['user_id']));
         $row = $stmt->fetch();
         if ($row) {

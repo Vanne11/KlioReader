@@ -144,6 +144,7 @@ export interface UserStats {
   level: number;
   streak: number;
   last_streak_date: string | null;
+  selected_title_id?: string | null;
 }
 
 export interface CheckHashResponse {
