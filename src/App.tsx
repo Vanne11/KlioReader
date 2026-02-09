@@ -245,12 +245,14 @@ function App() {
     const savedRaw = localStorage.getItem('klioUnlockedBadges');
     const previousIds: string[] = savedRaw ? JSON.parse(savedRaw) : [];
     const newBadges = currentUnlocked.filter(id => !previousIds.includes(id));
-    if (newBadges.length > 0 && previousIds.length > 0) {
+    if (newBadges.length > 0 && previousIds.length > 0 && !initialRenderRef.current) {
       const badge = BADGES.find(b => b.id === newBadges[0]);
       if (badge) showAlert('success', '¡Nueva Insignia!', `🏆 ${badge.name} — ${badge.description}`);
     }
-    if (currentUnlocked.length !== previousIds.length || newBadges.length > 0) {
-      localStorage.setItem('klioUnlockedBadges', JSON.stringify(currentUnlocked));
+    // Merge: never lose previously notified badges (books may load after stats)
+    const allKnown = [...new Set([...previousIds, ...currentUnlocked])];
+    if (allKnown.length !== previousIds.length) {
+      localStorage.setItem('klioUnlockedBadges', JSON.stringify(allKnown));
     }
   }, [stats, books]);
 

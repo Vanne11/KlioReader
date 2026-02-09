@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS users (
     email TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     avatar TEXT DEFAULT NULL,
+    selected_title_id TEXT DEFAULT NULL,
     xp INTEGER DEFAULT 0,
     level INTEGER DEFAULT 1,
     streak INTEGER DEFAULT 0,

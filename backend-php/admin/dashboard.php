@@ -95,6 +95,7 @@ require_once __DIR__ . '/../templates/admin-layout.php';
                     <th>Libro</th>
                     <th>Usuario</th>
                     <th>Tamano</th>
+                    <th></th>
                 </tr>
             </thead>
             <tbody>
@@ -106,15 +107,45 @@ require_once __DIR__ . '/../templates/admin-layout.php';
                     </td>
                     <td class="text-sm"><?php echo e($b['username']); ?></td>
                     <td class="text-klio-muted text-xs"><?php echo format_bytes($b['file_size']); ?></td>
+                    <td class="text-xs">
+                        <a href="<?php echo base_url('admin/download.php?id=' . $b['id']); ?>" class="text-klio-primary hover:underline" title="Descargar">&#x21E9;</a>
+                        <button onclick="copyLink(<?php echo $b['id']; ?>)" class="ml-1 text-klio-muted hover:text-klio-text" title="Copiar enlace">&#x1F4CB;</button>
+                    </td>
                 </tr>
                 <?php endforeach; ?>
                 <?php if (empty($latestBooks)): ?>
-                <tr><td colspan="3" class="text-center text-klio-muted py-6">Sin libros aun</td></tr>
+                <tr><td colspan="4" class="text-center text-klio-muted py-6">Sin libros aun</td></tr>
                 <?php endif; ?>
             </tbody>
         </table>
     </div>
 </div>
+
+<script>
+function copyLink(bookId) {
+    var url = window.location.origin + '<?php echo base_url("admin/download.php?id="); ?>' + bookId;
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(url).then(function() {
+            showToast('Enlace copiado');
+        });
+    } else {
+        var ta = document.createElement('textarea');
+        ta.value = url;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        showToast('Enlace copiado');
+    }
+}
+function showToast(msg) {
+    var t = document.createElement('div');
+    t.textContent = msg;
+    t.className = 'fixed bottom-4 right-4 bg-klio-primary text-white px-4 py-2 rounded-lg text-sm shadow-lg z-50';
+    document.body.appendChild(t);
+    setTimeout(function() { t.remove(); }, 2000);
+}
+</script>
 
     </main>
 </div>

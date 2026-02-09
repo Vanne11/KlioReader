@@ -12,3 +12,7 @@ CREATE TABLE IF NOT EXISTS stored_files (
 );
 
 CREATE INDEX IF NOT EXISTS idx_stored_files_hash ON stored_files(file_hash);
+
+-- Agregar columna stored_file_id a books (enlace al archivo físico deduplicado)
+-- SQLite no soporta IF NOT EXISTS en ALTER TABLE, pero install.php verifica antes de ejecutar
+ALTER TABLE books ADD COLUMN stored_file_id INTEGER DEFAULT NULL;

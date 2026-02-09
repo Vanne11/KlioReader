@@ -110,18 +110,6 @@ if (empty($errors)) {
         $migration003 = __DIR__ . '/migrations/003_add_file_dedup.sql';
         if (file_exists($migration003)) {
             $pdo->exec(file_get_contents($migration003));
-            // Agregar columna stored_file_id a books si no existe
-            $cols = $pdo->query('PRAGMA table_info(books)')->fetchAll(PDO::FETCH_ASSOC);
-            $hasStoredFileId = false;
-            foreach ($cols as $col) {
-                if ($col['name'] === 'stored_file_id') {
-                    $hasStoredFileId = true;
-                    break;
-                }
-            }
-            if (!$hasStoredFileId) {
-                $pdo->exec('ALTER TABLE books ADD COLUMN stored_file_id INTEGER DEFAULT NULL');
-            }
             $checks[] = array('Migración 003 (dedup)', 'Aplicada', true);
         }
 

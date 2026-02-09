@@ -214,6 +214,7 @@ require_once __DIR__ . '/../templates/admin-layout.php';
                 <th>Tamano</th>
                 <th>Ultima lectura</th>
                 <th>Subido</th>
+                <th></th>
             </tr>
         </thead>
         <tbody>
@@ -242,12 +243,42 @@ require_once __DIR__ . '/../templates/admin-layout.php';
                 <td class="text-klio-muted text-xs"><?php echo format_bytes((int)$b['file_size']); ?></td>
                 <td class="text-klio-muted text-xs"><?php echo $b['last_read'] ? e(substr($b['last_read'], 0, 16)) : '-'; ?></td>
                 <td class="text-klio-muted text-xs"><?php echo e(substr($b['created_at'], 0, 10)); ?></td>
+                <td class="text-xs whitespace-nowrap">
+                    <a href="<?php echo base_url('admin/download.php?id=' . $b['id']); ?>" class="text-klio-primary hover:underline" title="Descargar">&#x21E9;</a>
+                    <button onclick="copyLink(<?php echo $b['id']; ?>)" class="ml-1 text-klio-muted hover:text-klio-text" title="Copiar enlace">&#x1F4CB;</button>
+                </td>
             </tr>
             <?php endforeach; ?>
         </tbody>
     </table>
     <?php endif; ?>
 </div>
+
+<script>
+function copyLink(bookId) {
+    var url = window.location.origin + '<?php echo base_url("admin/download.php?id="); ?>' + bookId;
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(url).then(function() {
+            showToast('Enlace copiado');
+        });
+    } else {
+        var ta = document.createElement('textarea');
+        ta.value = url;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        showToast('Enlace copiado');
+    }
+}
+function showToast(msg) {
+    var t = document.createElement('div');
+    t.textContent = msg;
+    t.className = 'fixed bottom-4 right-4 bg-klio-primary text-white px-4 py-2 rounded-lg text-sm shadow-lg z-50';
+    document.body.appendChild(t);
+    setTimeout(function() { t.remove(); }, 2000);
+}
+</script>
 
     </main>
 </div>
