@@ -227,9 +227,9 @@ class BookController
         }
 
         $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
-        if (!in_array($ext, array('epub', 'pdf'))) {
+        if (!in_array($ext, array('epub', 'pdf', 'cbr', 'cbz'))) {
             http_response_code(422);
-            echo json_encode(array('error' => 'Solo se permiten archivos EPUB y PDF'));
+            echo json_encode(array('error' => 'Solo se permiten archivos EPUB, PDF, CBR y CBZ'));
             return;
         }
 
@@ -505,7 +505,13 @@ class BookController
             return;
         }
 
-        $mime = $book['file_type'] === 'pdf' ? 'application/pdf' : 'application/epub+zip';
+        $mimeTypes = array(
+            'pdf' => 'application/pdf',
+            'epub' => 'application/epub+zip',
+            'cbr' => 'application/x-cbr',
+            'cbz' => 'application/x-cbz',
+        );
+        $mime = isset($mimeTypes[$book['file_type']]) ? $mimeTypes[$book['file_type']] : 'application/octet-stream';
 
         // Priorizar stored_files si existe, fallback a campos legacy de books
         if (!empty($book['stored_file_id']) && !empty($book['sf_storage_path'])) {

@@ -111,8 +111,10 @@ export function FoliateReader({
         view.renderer.setAttribute('max-column-count', String(pageColumns));
       }
 
-      // Apply initial styles
-      view.renderer.setStyles(buildCSS(theme, fontSize, fontFamily, isComic));
+      // Apply initial styles (fixed-layout renderers like comics may not support setStyles)
+      if (typeof view.renderer.setStyles === 'function') {
+        view.renderer.setStyles(buildCSS(theme, fontSize, fontFamily, isComic));
+      }
 
       // Navigate to saved position
       const section = initialSectionRef.current ?? 0;
@@ -156,7 +158,7 @@ export function FoliateReader({
   // Update styles when theme/font/fontSize change
   useEffect(() => {
     const view = viewRef.current;
-    if (!view?.renderer) return;
+    if (!view?.renderer || typeof view.renderer.setStyles !== 'function') return;
     view.renderer.setStyles(buildCSS(theme, fontSize, fontFamily, isComic));
   }, [theme, fontSize, fontFamily]);
 

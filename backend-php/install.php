@@ -175,6 +175,12 @@ if (empty($errors)) {
             $pdo->exec(file_get_contents($migration008));
             $checks[] = array('Migración 008 (social)', 'Aplicada', true);
         }
+        // Migración 009: Colecciones y Sagas
+        $migration009 = __DIR__ . '/migrations/009_collections.sql';
+        if (file_exists($migration009)) {
+            $pdo->exec(file_get_contents($migration009));
+            $checks[] = array('Migración 009 (colecciones)', 'Aplicada', true);
+        }
     } catch (Exception $e) {
         $errors[] = 'Error al crear la base de datos: ' . $e->getMessage();
         $checks[] = array('Base de datos SQLite', 'Error: ' . $e->getMessage(), false);

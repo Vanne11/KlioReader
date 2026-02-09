@@ -504,6 +504,52 @@ struct LocalFileInfo {
     last_modified: String,
 }
 
+fn scan_local_file(path: &Path, prefix: &str) -> Result<Option<LocalFileInfo>, String> {
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+    if !matches!(ext.to_lowercase().as_str(), "epub" | "pdf" | "cbz" | "cbr") {
+        return Ok(None);
+    }
+
+    let basename = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+    if basename.is_empty() {
+        return Ok(None);
+    }
+
+    let filename = if prefix.is_empty() {
+        basename.clone()
+    } else {
+        format!("{}/{}", prefix, basename)
+    };
+
+    let metadata = std::fs::metadata(path).map_err(|e| e.to_string())?;
+    let size = metadata.len();
+
+    let data = std::fs::read(path).map_err(|e| format!("Read {}: {}", filename, e))?;
+    let mut hasher = Md5::new();
+    hasher.update(&data);
+    let md5 = hex::encode(hasher.finalize());
+
+    let last_modified = metadata
+        .modified()
+        .ok()
+        .and_then(|t| {
+            let dt: chrono::DateTime<Utc> = t.into();
+            Some(dt.to_rfc3339())
+        })
+        .unwrap_or_default();
+
+    Ok(Some(LocalFileInfo {
+        filename,
+        path: path.to_string_lossy().to_string(),
+        md5,
+        size,
+        last_modified,
+    }))
+}
+
 fn scan_local_books(dir: &Path) -> Result<Vec<LocalFileInfo>, String> {
     let mut files = Vec::new();
     if !dir.exists() {
@@ -514,44 +560,33 @@ fn scan_local_books(dir: &Path) -> Result<Vec<LocalFileInfo>, String> {
     for entry in entries {
         let entry = entry.map_err(|e| e.to_string())?;
         let path = entry.path();
-        if !path.is_file() {
-            continue;
+
+        if path.is_file() {
+            if let Some(info) = scan_local_file(&path, "")? {
+                files.push(info);
+            }
+        } else if path.is_dir() {
+            // Escanear subcarpetas un nivel (sagas)
+            let folder_name = path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+
+            if folder_name.starts_with('.') || folder_name.is_empty() {
+                continue;
+            }
+
+            if let Ok(sub_entries) = std::fs::read_dir(&path) {
+                for sub_entry in sub_entries {
+                    if let Ok(sub_entry) = sub_entry {
+                        let sub_path = sub_entry.path();
+                        if let Some(info) = scan_local_file(&sub_path, &folder_name)? {
+                            files.push(info);
+                        }
+                    }
+                }
+            }
         }
-        let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-        if ext != "epub" && ext != "pdf" {
-            continue;
-        }
-
-        let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
-        if filename.is_empty() {
-            continue;
-        }
-
-        let metadata = std::fs::metadata(&path).map_err(|e| e.to_string())?;
-        let size = metadata.len();
-
-        // Compute MD5
-        let data = std::fs::read(&path).map_err(|e| format!("Read {}: {}", filename, e))?;
-        let mut hasher = Md5::new();
-        hasher.update(&data);
-        let md5 = hex::encode(hasher.finalize());
-
-        let last_modified = metadata
-            .modified()
-            .ok()
-            .and_then(|t| {
-                let dt: chrono::DateTime<Utc> = t.into();
-                Some(dt.to_rfc3339())
-            })
-            .unwrap_or_default();
-
-        files.push(LocalFileInfo {
-            filename,
-            path: path.to_string_lossy().to_string(),
-            md5,
-            size,
-            last_modified,
-        });
     }
 
     Ok(files)

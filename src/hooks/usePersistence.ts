@@ -10,8 +10,10 @@ import { useShares } from './useShares';
 import { useChallenges } from './useChallenges';
 import { useAuth } from './useAuth';
 import { useSyncEvents } from './useStorageSync';
-import { buildInvokeConfig, detectBookType } from '@/lib/constants';
-import type { Book, BookMetadata } from '@/types';
+import { buildInvokeConfig } from '@/lib/constants';
+import { mapScanResults } from './useLibrary';
+import { useCollections } from './useCollections';
+import type { ScanResult } from '@/types';
 
 export function usePersistence() {
   const libraryView = useLibraryStore(s => s.libraryView);
@@ -40,6 +42,7 @@ export function usePersistence() {
   const { loadPendingSharesCount } = useShares();
   const { loadPendingCount: loadPendingChallengesCount } = useChallenges();
   const { loadProfile } = useAuth();
+  const { detectSagasFromScan, loadCloudCollections, loadPendingCollectionSharesCount } = useCollections();
 
   // Sync events listener
   useSyncEvents();
@@ -95,22 +98,10 @@ export function usePersistence() {
       }
       if (path) {
         try {
-          const results: [string, BookMetadata][] = await invoke("scan_directory", { dirPath: path });
-          const savedRaw = localStorage.getItem("books_meta_v3");
-          const progressMap = new Map();
-          if (savedRaw) JSON.parse(savedRaw).forEach((b: any) => progressMap.set(b.id, b));
-          const scannedBooks: Book[] = results.map(([filePath, meta]) => {
-            const saved = progressMap.get(filePath);
-            return {
-              ...meta, id: filePath, path: filePath,
-              title: saved?.title || meta.title, author: saved?.author || meta.author,
-              description: saved?.description ?? meta.description ?? null,
-              currentChapter: saved?.currentChapter || 0, progress: saved?.progress || 0,
-              lastRead: saved?.lastRead || "Sin leer",
-              type: detectBookType(filePath),
-            };
-          });
+          const results: ScanResult[] = await invoke("scan_directory", { dirPath: path });
+          const scannedBooks = mapScanResults(results);
           setBooks(scannedBooks);
+          detectSagasFromScan(results);
         } catch (err) { console.error(err); }
       }
     }
@@ -123,6 +114,8 @@ export function usePersistence() {
       loadCloudBooks();
       loadPendingSharesCount();
       loadPendingChallengesCount();
+      loadCloudCollections();
+      loadPendingCollectionSharesCount();
     }
   }, [authUser]);
 

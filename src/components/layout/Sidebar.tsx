@@ -15,6 +15,7 @@ import { useGamificationStore } from '@/stores/gamificationStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useSharesStore } from '@/stores/sharesStore';
 import { useSocialStore } from '@/stores/socialStore';
+import { useCollectionsStore } from '@/stores/collectionsStore';
 import { useAuth } from '@/hooks/useAuth';
 import { useShares } from '@/hooks/useShares';
 import { getUserTitle, getBadgeImageUrl, RARITY_CONFIG } from '@/lib/gamification';
@@ -37,6 +38,7 @@ export function Sidebar({ onClose }: SidebarProps) {
   const { setSettingsTab } = useSettingsStore();
   const pendingSharesCount = useSharesStore(s => s.pendingSharesCount);
   const pendingChallengesCount = useSocialStore(s => s.pendingChallengesCount);
+  const pendingCollectionSharesCount = useCollectionsStore(s => s.pendingCollectionSharesCount);
   const socialStats = useGamificationStore(s => s.socialStats);
   const { handleLogout, loadProfile } = useAuth();
   const { loadPendingShares } = useShares();
@@ -61,7 +63,7 @@ export function Sidebar({ onClose }: SidebarProps) {
         <Button variant={activeTab === "library" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => navigate("library")}><Library className="w-5 h-5 text-primary" /> {t('sidebar.library')}</Button>
         <Button variant={activeTab === "cloud" ? "secondary" : "ghost"} className="w-full justify-start gap-3 relative" onClick={() => { navigate("cloud"); if (pendingSharesCount > 0) loadPendingShares(); }}>
           <Cloud className="w-5 h-5 text-blue-400" /> {t('sidebar.cloud')}
-          {(pendingSharesCount + pendingChallengesCount) > 0 && <span className="absolute right-2 top-1/2 -translate-y-1/2 bg-red-500 text-white text-[9px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">{pendingSharesCount + pendingChallengesCount}</span>}
+          {(pendingSharesCount + pendingChallengesCount + pendingCollectionSharesCount) > 0 && <span className="absolute right-2 top-1/2 -translate-y-1/2 bg-red-500 text-white text-[9px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">{pendingSharesCount + pendingChallengesCount + pendingCollectionSharesCount}</span>}
         </Button>
         <Button variant={activeTab === "gamification" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => navigate("gamification")}><Trophy className="w-5 h-5 text-yellow-500" /> {t('sidebar.myProgress')}</Button>
         <Button variant={activeTab === "settings" ? "secondary" : "ghost"} className="w-full justify-start gap-3" onClick={() => navigate("settings")}><Settings2 className="w-5 h-5 text-zinc-400" /> {t('sidebar.settings')}</Button>

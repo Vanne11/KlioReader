@@ -157,7 +157,8 @@ async function processOne(op: SyncOp): Promise<boolean> {
 
       // Leer archivo
       const bytes: number[] = await invoke("read_file_bytes", { path: bookPath });
-      const mimeType = fileType === 'pdf' ? 'application/pdf' : 'application/epub+zip';
+      const mimeMap: Record<string, string> = { pdf: 'application/pdf', epub: 'application/epub+zip', cbr: 'application/x-cbr', cbz: 'application/x-cbz' };
+      const mimeType = mimeMap[fileType] || 'application/octet-stream';
       const blob = new Blob([new Uint8Array(bytes)], { type: mimeType });
       const fileName = bookPath.split('/').pop() || 'book';
       const file = new File([blob], fileName, { type: mimeType });

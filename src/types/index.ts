@@ -16,6 +16,76 @@ export interface Book extends BookMetadata {
   lastRead: string;
   path: string;
   type: 'epub' | 'pdf' | 'cbz' | 'cbr';
+  subfolder?: string | null;
+  inferredOrder?: number | null;
+  displayName?: string | null;
+}
+
+export type CollectionType = 'saga' | 'collection';
+export type CollectionSortOrder = 'manual' | 'title' | 'added';
+
+export interface CollectionBookEntry {
+  bookId: string;
+  orderIndex: number;
+  displayName: string | null;
+}
+
+export interface LocalCollection {
+  id: string;
+  name: string;
+  description: string | null;
+  type: CollectionType;
+  coverBase64: string | null;
+  sortOrder: CollectionSortOrder;
+  bookEntries: CollectionBookEntry[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CloudCollection {
+  id: number;
+  user_id: number;
+  name: string;
+  description: string | null;
+  type: CollectionType;
+  cover_base64: string | null;
+  sort_order: CollectionSortOrder;
+  book_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CloudCollectionDetail extends CloudCollection {
+  books: (import('@/lib/api').CloudBook & {
+    order_index: number;
+    cb_display_name: string | null;
+    cb_added_at: string;
+  })[];
+}
+
+export interface CollectionShare {
+  id: number;
+  collection_id: number;
+  from_user_id: number;
+  to_user_id: number;
+  status: 'pending' | 'accepted' | 'rejected';
+  message: string | null;
+  from_username: string;
+  from_avatar: string | null;
+  snap_name: string;
+  snap_description: string | null;
+  snap_cover_base64: string | null;
+  snap_book_count: number;
+  snap_type: CollectionType;
+  created_at: string;
+}
+
+export interface ScanResult {
+  path: string;
+  metadata: BookMetadata;
+  subfolder: string | null;
+  inferred_order: number | null;
+  display_name: string | null;
 }
 
 export type LibraryView = 'grid-large' | 'grid-mini' | 'grid-card' | 'list-info';

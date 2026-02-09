@@ -7,6 +7,7 @@ require_once __DIR__ . '/../src/Controllers/AuthController.php';
 require_once __DIR__ . '/../src/Controllers/BookController.php';
 require_once __DIR__ . '/../src/Controllers/UserController.php';
 require_once __DIR__ . '/../src/Controllers/ShareController.php';
+require_once __DIR__ . '/../src/Controllers/CollectionController.php';
 require_once __DIR__ . '/../src/Storage/StorageDriver.php';
 require_once __DIR__ . '/../src/Storage/LocalDriver.php';
 require_once __DIR__ . '/../src/Storage/B2Driver.php';
@@ -115,5 +116,22 @@ $router->delete('/voice-notes/{id}', AuthMiddleware::wrap(array('BookController'
 
 // -- Social stats (protegido) --
 $router->get('/user/social-stats', AuthMiddleware::wrap(array('UserController', 'socialStats')));
+
+// -- Colecciones (protegido) --
+$router->get('/collections', AuthMiddleware::wrap(array('CollectionController', 'listCollections')));
+$router->post('/collections', AuthMiddleware::wrap(array('CollectionController', 'create')));
+$router->get('/collections/{id}', AuthMiddleware::wrap(array('CollectionController', 'get')));
+$router->put('/collections/{id}', AuthMiddleware::wrap(array('CollectionController', 'update')));
+$router->delete('/collections/{id}', AuthMiddleware::wrap(array('CollectionController', 'delete')));
+$router->post('/collections/{id}/books', AuthMiddleware::wrap(array('CollectionController', 'addBooks')));
+$router->delete('/collections/{id}/books/{bookId}', AuthMiddleware::wrap(array('CollectionController', 'removeBook')));
+$router->put('/collections/{id}/reorder', AuthMiddleware::wrap(array('CollectionController', 'reorder')));
+$router->post('/collections/{id}/share', AuthMiddleware::wrap(array('CollectionController', 'share')));
+
+// -- Compartir colecciones (protegido) --
+$router->get('/collection-shares/pending', AuthMiddleware::wrap(array('CollectionController', 'pendingShares')));
+$router->get('/collection-shares/pending/count', AuthMiddleware::wrap(array('CollectionController', 'pendingCount')));
+$router->post('/collection-shares/{id}/accept', AuthMiddleware::wrap(array('CollectionController', 'acceptShare')));
+$router->post('/collection-shares/{id}/reject', AuthMiddleware::wrap(array('CollectionController', 'rejectShare')));
 
 $router->resolve();

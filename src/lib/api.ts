@@ -588,3 +588,96 @@ export interface SocialStats {
 export async function getSocialStats(): Promise<SocialStats> {
   return request<SocialStats>("/api/user/social-stats");
 }
+
+// ── Collections ──
+
+import type { CloudCollection, CloudCollectionDetail, CollectionShare, CollectionType, CollectionSortOrder } from '@/types';
+
+export async function listCollections(): Promise<CloudCollection[]> {
+  return request<CloudCollection[]>("/api/collections");
+}
+
+export async function createCollection(data: {
+  name: string;
+  description?: string;
+  type: CollectionType;
+  cover_base64?: string;
+  sort_order?: CollectionSortOrder;
+}): Promise<{ ok: boolean; id: number; name: string; type: string }> {
+  return request("/api/collections", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getCollection(id: number): Promise<CloudCollectionDetail> {
+  return request<CloudCollectionDetail>(`/api/collections/${id}`);
+}
+
+export async function updateCollection(
+  id: number,
+  data: Partial<{ name: string; description: string | null; cover_base64: string | null; sort_order: CollectionSortOrder }>
+): Promise<void> {
+  await request(`/api/collections/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteCollection(id: number): Promise<void> {
+  await request(`/api/collections/${id}`, { method: "DELETE" });
+}
+
+export async function addBooksToCollection(
+  collectionId: number,
+  bookIds: number[],
+  displayNames?: Record<number, string>
+): Promise<{ ok: boolean; added: number }> {
+  return request(`/api/collections/${collectionId}/books`, {
+    method: "POST",
+    body: JSON.stringify({ book_ids: bookIds, display_names: displayNames }),
+  });
+}
+
+export async function removeBookFromCollection(collectionId: number, bookId: number): Promise<void> {
+  await request(`/api/collections/${collectionId}/books/${bookId}`, { method: "DELETE" });
+}
+
+export async function reorderCollection(
+  collectionId: number,
+  bookIds: number[],
+  displayNames?: Record<number, string>
+): Promise<void> {
+  await request(`/api/collections/${collectionId}/reorder`, {
+    method: "PUT",
+    body: JSON.stringify({ book_ids: bookIds, display_names: displayNames }),
+  });
+}
+
+export async function shareCollection(
+  collectionId: number,
+  toUserId: number,
+  message?: string
+): Promise<{ ok: boolean; id: number }> {
+  return request(`/api/collections/${collectionId}/share`, {
+    method: "POST",
+    body: JSON.stringify({ to_user_id: toUserId, message: message || null }),
+  });
+}
+
+export async function getPendingCollectionShares(): Promise<CollectionShare[]> {
+  return request<CollectionShare[]>("/api/collection-shares/pending");
+}
+
+export async function getPendingCollectionSharesCount(): Promise<number> {
+  const res = await request<{ count: number }>("/api/collection-shares/pending/count");
+  return res.count;
+}
+
+export async function acceptCollectionShare(shareId: number): Promise<{ ok: boolean; collection_id: number; books_added: number }> {
+  return request(`/api/collection-shares/${shareId}/accept`, { method: "POST" });
+}
+
+export async function rejectCollectionShare(shareId: number): Promise<void> {
+  await request(`/api/collection-shares/${shareId}/reject`, { method: "POST" });
+}

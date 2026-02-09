@@ -7,8 +7,8 @@ import { useGamificationStore } from '@/stores/gamificationStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useUIStore } from '@/stores/uiStore';
 import { statsFromApi, getUnlockedBadges } from '@/lib/gamification';
-import type { Book, CloudBook } from '@/types';
-import { detectBookType } from '@/lib/constants';
+import type { Book, CloudBook, ScanResult } from '@/types';
+import { mapScanResults } from './useLibrary';
 
 // Ref to prevent re-enqueuing cloud data back to queue
 let cloudSyncingRef = false;
@@ -125,21 +125,8 @@ export function useCloudBooks() {
         await invoke("save_file_bytes", { path: savePath, bytes });
       }
       // Re-scan library directly (can't call hooks outside component)
-      const results: [string, any][] = await invoke("scan_directory", { dirPath: libraryPath });
-      const savedRaw = localStorage.getItem("books_meta_v3");
-      const progressMap = new Map();
-      if (savedRaw) JSON.parse(savedRaw).forEach((b: any) => progressMap.set(b.id, b));
-      const scannedBooks: Book[] = results.map(([filePath, meta]) => {
-        const saved = progressMap.get(filePath);
-        return {
-          ...meta, id: filePath, path: filePath,
-          title: saved?.title || meta.title, author: saved?.author || meta.author,
-          description: saved?.description ?? meta.description ?? null,
-          currentChapter: saved?.currentChapter || 0, progress: saved?.progress || 0,
-          lastRead: saved?.lastRead || "Sin leer",
-          type: detectBookType(filePath),
-        };
-      });
+      const results: ScanResult[] = await invoke("scan_directory", { dirPath: libraryPath });
+      const scannedBooks = mapScanResults(results);
       setBooks(scannedBooks);
 
       showAlert('success', copiedLocally ? 'Libro copiado (duplicado)' : 'Libro descargado',

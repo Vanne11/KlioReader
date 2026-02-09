@@ -306,19 +306,106 @@ fn get_metadata(path: String) -> Result<BookMetadata, String> {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+struct ScanResult {
+    path: String,
+    metadata: BookMetadata,
+    subfolder: Option<String>,
+    inferred_order: Option<u32>,
+    display_name: Option<String>,
+}
+
+fn infer_order_from_filename(filename: &str) -> Option<u32> {
+    // Extraer el primer número del nombre de archivo (sin extensión)
+    let stem = Path::new(filename).file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(filename);
+
+    let mut num_str = String::new();
+    let mut found = false;
+
+    for ch in stem.chars() {
+        if ch.is_ascii_digit() {
+            num_str.push(ch);
+            found = true;
+        } else if found {
+            break;
+        }
+    }
+
+    if found {
+        num_str.parse::<u32>().ok()
+    } else {
+        None
+    }
+}
+
+fn scan_book_entry(file_path: &Path, subfolder: Option<String>) -> Option<ScanResult> {
+    let ext = file_path.extension().and_then(|s| s.to_str()).unwrap_or("");
+    if !matches!(ext.to_lowercase().as_str(), "epub" | "pdf" | "cbz" | "cbr") {
+        return None;
+    }
+
+    let meta = get_metadata(file_path.to_string_lossy().to_string()).ok()?;
+    let filename = file_path.file_name()?.to_str()?;
+
+    let inferred_order = if subfolder.is_some() {
+        infer_order_from_filename(filename)
+    } else {
+        None
+    };
+
+    let display_name = match (&subfolder, inferred_order) {
+        (Some(folder), Some(order)) => Some(format!("{} #{}", folder, order)),
+        _ => None,
+    };
+
+    Some(ScanResult {
+        path: file_path.to_string_lossy().to_string(),
+        metadata: meta,
+        subfolder,
+        inferred_order,
+        display_name,
+    })
+}
+
 #[tauri::command]
-fn scan_directory(dir_path: String) -> Result<Vec<(String, BookMetadata)>, String> {
+fn scan_directory(dir_path: String) -> Result<Vec<ScanResult>, String> {
     let mut books = Vec::new();
     let path = Path::new(&dir_path);
-    if path.is_dir() {
-        for entry in std::fs::read_dir(path).map_err(|e| e.to_string())? {
-            let entry = entry.map_err(|e| e.to_string())?;
-            let file_path = entry.path();
-            if file_path.is_file() {
-                let ext = file_path.extension().and_then(|s| s.to_str()).unwrap_or("");
-                if matches!(ext, "epub" | "pdf" | "cbz" | "cbr") {
-                    if let Ok(meta) = get_metadata(file_path.to_string_lossy().to_string()) {
-                        books.push((file_path.to_string_lossy().to_string(), meta));
+    if !path.is_dir() {
+        return Ok(books);
+    }
+
+    for entry in std::fs::read_dir(path).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let file_path = entry.path();
+
+        if file_path.is_file() {
+            if let Some(result) = scan_book_entry(&file_path, None) {
+                books.push(result);
+            }
+        } else if file_path.is_dir() {
+            // Escanear un nivel de subcarpetas (sagas)
+            let folder_name = file_path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+
+            // Ignorar carpetas ocultas
+            if folder_name.starts_with('.') {
+                continue;
+            }
+
+            if let Ok(sub_entries) = std::fs::read_dir(&file_path) {
+                for sub_entry in sub_entries {
+                    if let Ok(sub_entry) = sub_entry {
+                        let sub_path = sub_entry.path();
+                        if sub_path.is_file() {
+                            if let Some(result) = scan_book_entry(&sub_path, Some(folder_name.clone())) {
+                                books.push(result);
+                            }
+                        }
                     }
                 }
             }
@@ -389,6 +476,51 @@ fn get_default_library_path(app: tauri::AppHandle) -> Result<String, String> {
     Ok(path.to_string_lossy().to_string())
 }
 
+#[tauri::command]
+fn create_subfolder(base_path: String, folder_name: String) -> Result<String, String> {
+    let path = Path::new(&base_path).join(&folder_name);
+    std::fs::create_dir_all(&path).map_err(|e| format!("Error creando carpeta: {}", e))?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn move_file_to_subfolder(file_path: String, dest_folder: String) -> Result<String, String> {
+    let src = Path::new(&file_path);
+    let filename = src.file_name()
+        .ok_or_else(|| "No se pudo obtener el nombre del archivo".to_string())?;
+    let dest = Path::new(&dest_folder).join(filename);
+
+    // Crear carpeta destino si no existe
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("Error creando directorio: {}", e))?;
+    }
+
+    std::fs::rename(&src, &dest).map_err(|e| format!("Error moviendo archivo: {}", e))?;
+    Ok(dest.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn move_file_to_root(file_path: String, library_path: String) -> Result<String, String> {
+    let src = Path::new(&file_path);
+    let filename = src.file_name()
+        .ok_or_else(|| "No se pudo obtener el nombre del archivo".to_string())?;
+    let dest = Path::new(&library_path).join(filename);
+
+    std::fs::rename(&src, &dest).map_err(|e| format!("Error moviendo archivo: {}", e))?;
+    Ok(dest.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn rename_file(file_path: String, new_name: String) -> Result<String, String> {
+    let src = Path::new(&file_path);
+    let parent = src.parent()
+        .ok_or_else(|| "No se pudo obtener el directorio padre".to_string())?;
+    let dest = parent.join(&new_name);
+
+    std::fs::rename(&src, &dest).map_err(|e| format!("Error renombrando archivo: {}", e))?;
+    Ok(dest.to_string_lossy().to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -408,6 +540,10 @@ pub fn run() {
             save_file_bytes,
             copy_file,
             file_exists,
+            create_subfolder,
+            move_file_to_subfolder,
+            move_file_to_root,
+            rename_file,
             storage::commands::user_storage_test_connection,
             storage::commands::user_storage_configure,
             storage::commands::user_storage_sync_now,

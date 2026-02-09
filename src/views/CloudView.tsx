@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   BookOpen, Cloud, CloudUpload, CloudDownload, LogIn, Loader2, Server, Trash2, Pencil,
   User, AlertTriangle, Check, X, Share2, Bell, Send, Search, Users, ChevronDown, ChevronUp,
-  Trophy, Swords, Flag,
+  Trophy, Swords, Flag, FolderOpen, Layers, Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -21,6 +21,8 @@ import { useCloudBooks } from '@/hooks/useCloudBooks';
 import { useShares } from '@/hooks/useShares';
 import { useRaces } from '@/hooks/useRaces';
 import { useChallenges } from '@/hooks/useChallenges';
+import { useCollections } from '@/hooks/useCollections';
+import { useCollectionsStore } from '@/stores/collectionsStore';
 import { RaceLeaderboard } from '@/components/social/RaceLeaderboard';
 import { ChallengeCard } from '@/components/social/ChallengeCard';
 import { coverSrc, formatBytes } from '@/lib/utils';
@@ -46,9 +48,23 @@ export function CloudView() {
   const { loadPendingShares, handleAcceptShare, handleRejectShare, handleShareSearch, handleSendShare, openShareDialog, loadAllSharedProgress } = useShares();
   const { createRace, loadLeaderboard } = useRaces();
   const { loadChallenges, handleAcceptChallenge, handleRejectChallenge, createChallenge, checkChallengeStatus } = useChallenges();
+  const {
+    loadCloudCollections, createCloudCollection, deleteCloudCollection,
+    addBooksToCloudCollection, shareCloudCollection,
+    loadPendingCollectionShares, acceptCollectionShare, rejectCollectionShare,
+  } = useCollections();
+  const cloudCollections = useCollectionsStore(s => s.cloudCollections);
+  const pendingCollectionShares = useCollectionsStore(s => s.pendingCollectionShares);
+  const { setSharingCollection } = useCollectionsStore();
+  const sharingCollection = useCollectionsStore(s => s.sharingCollection);
 
   const [showChallengeDialog, setShowChallengeDialog] = useState<api.CloudBook | null>(null);
   const [challengeForm, setChallengeForm] = useState({ challenged_id: 0, challenge_type: 'finish_before' as api.ChallengeType, target_days: 7, target_chapters: 5 });
+  const [showNewCollectionForm, setShowNewCollectionForm] = useState(false);
+  const [newCollectionName, setNewCollectionName] = useState('');
+  const [newCollectionType, setNewCollectionType] = useState<'saga' | 'collection'>('collection');
+  const [addingToCollectionId, setAddingToCollectionId] = useState<number | null>(null);
+  const [collectionShareSearch, setCollectionShareSearch] = useState('');
 
   // Auto-refresh al entrar a la pestaña Nube
   useEffect(() => {
@@ -56,6 +72,8 @@ export function CloudView() {
       loadCloudBooks();
       loadPendingShares();
       loadChallenges();
+      loadCloudCollections();
+      loadPendingCollectionShares();
     }
   }, []);
 
@@ -242,6 +260,179 @@ export function CloudView() {
             )}
           </div>
         )}
+
+        {/* Collection Shares Pending */}
+        {authUser && pendingCollectionShares.length > 0 && (
+          <>
+            <Separator className="opacity-10" />
+            <div className="space-y-3">
+              <h2 className="text-lg font-bold flex items-center gap-2"><Bell className="w-5 h-5 text-purple-400" /> Invitaciones de colecciones ({pendingCollectionShares.length})</h2>
+              {pendingCollectionShares.map(share => (
+                <Card key={share.id} className="bg-purple-500/5 border-purple-500/20 p-3 md:p-4 space-y-2">
+                  <div className="flex gap-3 items-center">
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${share.snap_type === 'saga' ? 'bg-amber-400/10' : 'bg-blue-400/10'}`}>
+                      {share.snap_type === 'saga' ? <FolderOpen className="w-5 h-5 text-amber-400" /> : <Layers className="w-5 h-5 text-blue-400" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-sm font-bold truncate">{share.snap_name}</h3>
+                      <div className="flex items-center gap-2 text-[10px] opacity-50">
+                        <User className="w-3 h-3 text-primary" />
+                        <span className="font-bold">{share.from_username}</span>
+                        <span>· {share.snap_book_count} libros</span>
+                      </div>
+                      {share.message && <p className="text-[10px] opacity-60 mt-1 italic">"{share.message}"</p>}
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button size="sm" className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold text-xs" onClick={() => acceptCollectionShare(share.id)}><Check className="w-3 h-3 mr-1" /> {t('cloud.accept')}</Button>
+                    <Button size="sm" variant="outline" className="flex-1 border-white/10 text-xs" onClick={() => rejectCollectionShare(share.id)}><X className="w-3 h-3 mr-1" /> {t('cloud.reject')}</Button>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* Cloud Collections */}
+        {authUser && (
+          <>
+            <Separator className="opacity-10" />
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-bold flex items-center gap-2"><Layers className="w-5 h-5 text-blue-400" /> Colecciones</h2>
+                <Button variant="outline" size="sm" className="text-xs gap-1" onClick={() => setShowNewCollectionForm(v => !v)}>
+                  <Plus className="w-3 h-3" /> Nueva
+                </Button>
+              </div>
+
+              {showNewCollectionForm && (
+                <Card className="bg-white/5 border-white/10 p-4 space-y-3">
+                  <input
+                    value={newCollectionName}
+                    onChange={e => setNewCollectionName(e.target.value)}
+                    placeholder="Nombre de la colección"
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-sm focus:border-primary outline-none"
+                  />
+                  <div className="flex gap-2">
+                    <Button variant={newCollectionType === 'collection' ? 'secondary' : 'ghost'} className="flex-1 text-xs h-8" onClick={() => setNewCollectionType('collection')}>
+                      <Layers className="w-3 h-3 mr-1" /> Colección
+                    </Button>
+                    <Button variant={newCollectionType === 'saga' ? 'secondary' : 'ghost'} className="flex-1 text-xs h-8" onClick={() => setNewCollectionType('saga')}>
+                      <FolderOpen className="w-3 h-3 mr-1" /> Saga
+                    </Button>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" className="flex-1 border-white/10 text-xs" onClick={() => { setShowNewCollectionForm(false); setNewCollectionName(''); }}>Cancelar</Button>
+                    <Button size="sm" className="flex-1 font-bold text-xs" disabled={!newCollectionName.trim()} onClick={async () => {
+                      await createCloudCollection(newCollectionName.trim(), newCollectionType);
+                      setShowNewCollectionForm(false);
+                      setNewCollectionName('');
+                    }}>Crear</Button>
+                  </div>
+                </Card>
+              )}
+
+              {cloudCollections.length === 0 && !showNewCollectionForm ? (
+                <p className="text-[10px] opacity-30 text-center py-4">No tienes colecciones en la nube</p>
+              ) : (
+                <div className="space-y-2">
+                  {cloudCollections.map(col => (
+                    <Card key={col.id} className="bg-white/5 border-white/5 p-3 md:p-4">
+                      <div className="flex gap-3 items-center">
+                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${col.type === 'saga' ? 'bg-amber-400/10' : 'bg-blue-400/10'}`}>
+                          {col.type === 'saga' ? <FolderOpen className="w-5 h-5 text-amber-400" /> : <Layers className="w-5 h-5 text-blue-400" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h3 className="text-sm font-bold truncate">{col.name}</h3>
+                          <p className="text-[10px] opacity-40">{col.book_count} {col.book_count === 1 ? 'libro' : 'libros'} · {col.type}</p>
+                        </div>
+                        <div className="flex gap-1">
+                          <Tooltip><TooltipTrigger asChild>
+                            <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-green-600/20 hover:text-green-400" onClick={() => setAddingToCollectionId(addingToCollectionId === col.id ? null : col.id)}>
+                              <Plus className="w-4 h-4" />
+                            </Button>
+                          </TooltipTrigger><TooltipContent>Agregar libros</TooltipContent></Tooltip>
+                          <Tooltip><TooltipTrigger asChild>
+                            <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-cyan-600/20 hover:text-cyan-400" onClick={() => setSharingCollection(col)}>
+                              <Share2 className="w-4 h-4" />
+                            </Button>
+                          </TooltipTrigger><TooltipContent>Compartir colección</TooltipContent></Tooltip>
+                          <Tooltip><TooltipTrigger asChild>
+                            <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-red-600/20 hover:text-red-400" onClick={() => deleteCloudCollection(col.id)}>
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </TooltipTrigger><TooltipContent>Eliminar</TooltipContent></Tooltip>
+                        </div>
+                      </div>
+                      {/* Panel de agregar libros inline */}
+                      {addingToCollectionId === col.id && (
+                        <div className="mt-3 pt-3 border-t border-white/5 space-y-1 max-h-40 overflow-y-auto">
+                          {cloudBooks.map(cb => (
+                            <button
+                              key={cb.id}
+                              className="flex items-center gap-2 w-full text-left rounded-lg px-2 py-1.5 hover:bg-white/5 transition-colors text-xs"
+                              onClick={async () => { await addBooksToCloudCollection(col.id, [cb.id]); setAddingToCollectionId(null); }}
+                            >
+                              <div className="w-6 aspect-[2/3] rounded bg-[#0f0f14] overflow-hidden shrink-0 border border-white/10 flex items-center justify-center">
+                                {cb.cover_base64 ? <img src={coverSrc(cb.cover_base64)} className="w-full h-full object-contain" alt="" /> : <BookOpen className="w-2 h-2 opacity-10" />}
+                              </div>
+                              <span className="truncate">{cb.title}</span>
+                              <span className="text-[9px] opacity-30 ml-auto">{cb.author}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* Share Collection Dialog */}
+        <Dialog open={!!sharingCollection} onOpenChange={(open) => { if (!open) setSharingCollection(null); }}>
+          <DialogContent className="sm:max-w-[425px] bg-[#16161e] border-white/10 text-white">
+            <DialogHeader><DialogTitle className="flex items-center gap-2"><Share2 className="w-5 h-5 text-cyan-400" /> Compartir colección</DialogTitle></DialogHeader>
+            {sharingCollection && (
+              <div className="space-y-4 py-4">
+                <div className="flex gap-3 items-center bg-white/5 rounded-lg p-3">
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${sharingCollection.type === 'saga' ? 'bg-amber-400/10' : 'bg-blue-400/10'}`}>
+                    {sharingCollection.type === 'saga' ? <FolderOpen className="w-5 h-5 text-amber-400" /> : <Layers className="w-5 h-5 text-blue-400" />}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold truncate">{sharingCollection.name}</p>
+                    <p className="text-[10px] opacity-50">{sharingCollection.book_count} libros</p>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold uppercase opacity-50 tracking-widest">{t('cloud.searchUserLabel')}</label>
+                  <div className="relative">
+                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 opacity-30" />
+                    <input value={collectionShareSearch} onChange={e => { setCollectionShareSearch(e.target.value); handleShareSearch(e.target.value); }} placeholder={t('cloud.searchUserPlaceholder')} className="w-full bg-white/5 border border-white/10 rounded-lg pl-10 pr-4 py-3 text-sm focus:border-primary outline-none" />
+                  </div>
+                </div>
+                {shareSearchResults.length > 0 && (
+                  <div className="space-y-1 max-h-48 overflow-y-auto">
+                    {shareSearchResults.map(u => (
+                      <div key={u.id} className="flex items-center gap-3 bg-white/5 rounded-lg px-3 py-2 hover:bg-white/10 transition-colors">
+                        <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center shrink-0"><User className="w-3.5 h-3.5 text-primary" /></div>
+                        <span className="text-sm font-medium flex-1 truncate">{u.username}</span>
+                        <Button size="sm" className="h-7 text-xs px-3" onClick={async () => {
+                          await shareCloudCollection(sharingCollection.id, u.id);
+                          setSharingCollection(null);
+                          setCollectionShareSearch('');
+                        }}>
+                          <Send className="w-3 h-3 mr-1" /> {t('app.send')}
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
 
         {/* Challenges Section */}
         {authUser && challenges.length > 0 && (

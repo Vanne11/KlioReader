@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
+import type { LocalCollection, Book } from '@/types'
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -15,4 +16,17 @@ export function formatBytes(bytes: number): string {
 export function coverSrc(cover: string | null | undefined): string | undefined {
   if (!cover) return undefined;
   return cover.startsWith('data:') ? cover : `data:image/png;base64,${cover}`;
+}
+
+export function getCollectionCoverSrc(
+  collection: LocalCollection,
+  books: Book[]
+): string | undefined {
+  if (collection.coverBase64) return coverSrc(collection.coverBase64);
+  if (collection.bookEntries.length > 0) {
+    const firstBookId = collection.bookEntries[0].bookId;
+    const book = books.find(b => b.id === firstBookId);
+    if (book?.cover) return coverSrc(book.cover);
+  }
+  return undefined;
 }
