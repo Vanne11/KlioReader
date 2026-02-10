@@ -16,6 +16,7 @@ function setToken(token: string): void {
 export function clearAuth(): void {
   localStorage.removeItem("authToken");
   localStorage.removeItem("authUser");
+  localStorage.removeItem("klioCloudBooksCache");
 }
 
 export function getStoredUser(): AuthUser | null {
@@ -72,6 +73,9 @@ async function request<T>(
   }
 
   const text = await res.text();
+  if (!text.trim()) {
+    return {} as T;
+  }
   try {
     return JSON.parse(text);
   } catch {
@@ -285,6 +289,19 @@ export async function syncStats(stats: UserStats): Promise<void> {
 
 export async function listBooks(): Promise<CloudBook[]> {
   return request<CloudBook[]>("/api/books");
+}
+
+export interface BooksDigest {
+  hash: string;
+  count: number;
+}
+
+export async function getBooksDigest(): Promise<BooksDigest> {
+  return request<BooksDigest>("/api/books/digest");
+}
+
+export async function getBatchSharedProgress(): Promise<Record<string, SharedUserProgress[]>> {
+  return request<Record<string, SharedUserProgress[]>>("/api/shared-progress/batch");
 }
 
 export async function getBook(id: number): Promise<CloudBook> {

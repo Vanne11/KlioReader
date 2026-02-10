@@ -54,30 +54,113 @@ class BookController
         return $meta;
     }
 
+    // POST /api/books/covers — portadas solo para los IDs solicitados
+    public function covers($params)
+    {
+        $data = json_decode(file_get_contents('php://input'), true);
+        $ids = isset($data['ids']) ? $data['ids'] : array();
+
+        if (empty($ids)) {
+            echo json_encode(new \stdClass());
+            return;
+        }
+
+        // Sanitizar IDs
+        $ids = array_map('intval', array_slice($ids, 0, 200));
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $params2 = array_merge($ids, array($params['user_id']));
+
+        $db = Database::get();
+        $stmt = $db->prepare("SELECT id, cover_base64 FROM books WHERE id IN ($placeholders) AND user_id = ?");
+        $stmt->execute($params2);
+
+        $result = array();
+        foreach ($stmt->fetchAll() as $row) {
+            if ($row['cover_base64']) {
+                $result[(string)$row['id']] = $row['cover_base64'];
+            }
+        }
+
+        echo json_encode($result);
+    }
+
+    // GET /api/books/digest — hash rápido para verificar si hay cambios
+    public function digest($params)
+    {
+        $db = Database::get();
+        $userId = $params['user_id'];
+
+        // Hash ligero: concatenar id, progress, stored_file_id de todos los libros
+        $stmt = $db->prepare('
+            SELECT b.id, COALESCE(rp.progress_percent, 0) as pp, b.stored_file_id, b.title, b.author
+            FROM books b
+            LEFT JOIN reading_progress rp ON rp.book_id = b.id AND rp.user_id = b.user_id
+            WHERE b.user_id = ?
+            ORDER BY b.id
+        ');
+        $stmt->execute(array($userId));
+        $rows = $stmt->fetchAll();
+
+        $parts = array();
+        foreach ($rows as $r) {
+            $parts[] = $r['id'] . ':' . $r['pp'] . ':' . $r['stored_file_id'] . ':' . $r['title'] . ':' . $r['author'];
+        }
+
+        // Incluir count de shares aceptados para detectar cambios sociales
+        $stmt = $db->prepare('SELECT COUNT(*) FROM book_shares WHERE status = ? AND (from_user_id = ? OR to_user_id = ?)');
+        $stmt->execute(array('accepted', $userId, $userId));
+        $shareCount = $stmt->fetchColumn();
+        $parts[] = 'shares:' . $shareCount;
+
+        $hash = md5(implode('|', $parts));
+
+        echo json_encode(array('hash' => $hash, 'count' => count($rows)));
+    }
+
     // GET /api/books
     public function listBooks($params)
     {
         $db = Database::get();
+        $userId = $params['user_id'];
+
+        // Columnas explícitas SIN cover_base64 (ahorro masivo de payload)
         $stmt = $db->prepare('
-            SELECT b.*, rp.current_chapter, rp.current_page, rp.progress_percent, rp.last_read
+            SELECT b.id, b.user_id, b.title, b.author, b.description,
+                   b.file_name, b.file_path, b.file_size, b.file_type,
+                   b.total_chapters, b.storage_type, b.storage_file_id,
+                   b.book_hash, b.stored_file_id, b.created_at,
+                   COALESCE(rp.current_chapter, 0) as current_chapter,
+                   COALESCE(rp.current_page, 0) as current_page,
+                   COALESCE(rp.progress_percent, 0) as progress_percent,
+                   rp.last_read,
+                   COALESCE(sc.cnt, 0) as share_count
             FROM books b
             LEFT JOIN reading_progress rp ON rp.book_id = b.id AND rp.user_id = b.user_id
+            LEFT JOIN (
+                SELECT stored_file_id, COUNT(*) as cnt
+                FROM book_shares
+                WHERE status = ? AND (from_user_id = ? OR to_user_id = ?)
+                GROUP BY stored_file_id
+            ) sc ON sc.stored_file_id = b.stored_file_id
             WHERE b.user_id = ?
             ORDER BY COALESCE(rp.last_read, b.created_at) DESC
         ');
-        $stmt->execute(array($params['user_id']));
+        $stmt->execute(array('accepted', $userId, $userId, $userId));
         $books = $stmt->fetchAll();
 
-        // Convert numeric fields
+        // Convert numeric fields + mark duplicates
         $seenFileIds = array();
         foreach ($books as &$b) {
             $b['id'] = (int)$b['id'];
             $b['file_size'] = (int)$b['file_size'];
             $b['total_chapters'] = (int)$b['total_chapters'];
-            $b['current_chapter'] = (int)(isset($b['current_chapter']) ? $b['current_chapter'] : 0);
-            $b['current_page'] = (int)(isset($b['current_page']) ? $b['current_page'] : 0);
-            $b['progress_percent'] = (int)(isset($b['progress_percent']) ? $b['progress_percent'] : 0);
+            $b['current_chapter'] = (int)$b['current_chapter'];
+            $b['current_page'] = (int)$b['current_page'];
+            $b['progress_percent'] = (int)$b['progress_percent'];
+            $b['share_count'] = (int)$b['share_count'];
             $b['stored_file_id'] = $b['stored_file_id'] !== null ? (int)$b['stored_file_id'] : null;
+            // cover_base64 no incluido en la query — se usa null para indicar que no viene
+            $b['cover_base64'] = null;
             if ($b['stored_file_id'] !== null) {
                 $seenFileIds[$b['stored_file_id']][] = $b['id'];
             }
@@ -93,18 +176,6 @@ class BookController
         }
         foreach ($books as &$b) {
             $b['is_duplicate'] = ($b['stored_file_id'] !== null && isset($dupFileIds[$b['stored_file_id']]));
-        }
-        unset($b);
-
-        // Add share_count for each book
-        $userId = $params['user_id'];
-        foreach ($books as &$b) {
-            $b['share_count'] = 0;
-            if ($b['stored_file_id'] !== null) {
-                $stmt = $db->prepare('SELECT COUNT(*) FROM book_shares WHERE stored_file_id = ? AND status = ? AND (from_user_id = ? OR to_user_id = ?)');
-                $stmt->execute(array($b['stored_file_id'], 'accepted', $userId, $userId));
-                $b['share_count'] = (int)$stmt->fetchColumn();
-            }
         }
         unset($b);
 

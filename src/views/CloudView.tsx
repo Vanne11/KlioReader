@@ -68,6 +68,93 @@ export function CloudView() {
   const [showDedupConfirm, setShowDedupConfirm] = useState(false);
   const hasDuplicates = cloudBooks.some(cb => cb.is_duplicate);
 
+  function renderCloudBook(cb: typeof cloudBooks[number], variant: 'shared' | 'personal') {
+    return (
+      <Card key={cb.id} className={`${variant === 'shared' ? 'bg-cyan-400/[0.03] border-cyan-400/10' : 'bg-white/5 border-white/5'} p-3 md:p-4 space-y-0 overflow-hidden`}>
+        <div className="flex gap-3 md:gap-4 items-center">
+          <div className="w-10 md:w-12 aspect-[2/3] rounded bg-[#0f0f14] overflow-hidden shrink-0 border border-white/10 flex items-center justify-center">
+            {cb.cover_base64 ? <img src={coverSrc(cb.cover_base64)} className="w-full h-full object-contain" alt="" /> : <BookOpen className="w-4 h-4 opacity-10" />}
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="text-sm font-bold truncate">{cb.title}</h3>
+            <p className="text-[10px] opacity-50 italic">{cb.author || t('app.noAuthor')}</p>
+            <div className="flex items-center gap-2 md:gap-3 mt-1 flex-wrap">
+              {!(cb.share_count > 0 && sharedProgressMap[cb.id]?.length > 0) && (
+                <>
+                  <Progress value={cb.progress_percent} className="h-1 flex-1 max-w-[100px] md:max-w-[120px] bg-white/5" indicatorClassName="bg-blue-400" />
+                  <span className="text-[9px] font-bold text-blue-400">{cb.progress_percent}%</span>
+                </>
+              )}
+              <Badge variant="outline" className="text-[8px] h-4 opacity-50">{cb.file_type}</Badge>
+              {cb.is_duplicate && <Badge variant="outline" className="text-[8px] h-4 text-amber-400 border-amber-400/40">{t('cloud.duplicate')}</Badge>}
+              {cb.share_count > 0 && <Badge variant="outline" className="text-[8px] h-4 text-cyan-400 border-cyan-400/40"><Users className="w-2.5 h-2.5 mr-0.5" /> {t('cloud.shared')}</Badge>}
+            </div>
+          </div>
+          {/* Botones solo en desktop - inline */}
+          <div className="hidden md:flex gap-1 shrink-0">
+            <Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-primary/20 hover:text-primary" onClick={() => startEditCloudBook(cb)}><Pencil className="w-4 h-4" /></Button></TooltipTrigger><TooltipContent>{t('cloud.editTooltip')}</TooltipContent></Tooltip>
+            <Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-cyan-600/20 hover:text-cyan-400" onClick={() => openShareDialog(cb)}><Share2 className="w-4 h-4" /></Button></TooltipTrigger><TooltipContent>{t('cloud.shareTooltip')}</TooltipContent></Tooltip>
+            {cb.share_count > 0 && (
+              <>
+                <Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-yellow-600/20 hover:text-yellow-400" onClick={async () => { const raceId = await createRace(cb.id); if (raceId) { loadLeaderboard(raceId); } }}><Flag className="w-4 h-4" /></Button></TooltipTrigger><TooltipContent>{t('cloud.startRace')}</TooltipContent></Tooltip>
+                <Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-purple-600/20 hover:text-purple-400" onClick={() => setShowChallengeDialog(cb)}><Swords className="w-4 h-4" /></Button></TooltipTrigger><TooltipContent>{t('cloud.challengeTooltip')}</TooltipContent></Tooltip>
+              </>
+            )}
+            <Tooltip><TooltipTrigger asChild>
+              <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-green-600/20 hover:text-green-400" disabled={downloadingBookId === cb.id} onClick={() => downloadBookFromCloud(cb)}>
+                {downloadingBookId === cb.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <CloudDownload className="w-4 h-4" />}
+              </Button>
+            </TooltipTrigger><TooltipContent>{t('cloud.downloadTooltip')}</TooltipContent></Tooltip>
+            <Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-red-600/20 hover:text-red-400" onClick={() => deleteCloudBook(cb.id)}><Trash2 className="w-4 h-4" /></Button></TooltipTrigger><TooltipContent>{t('cloud.deleteTooltip')}</TooltipContent></Tooltip>
+          </div>
+        </div>
+        {/* Botones en mobile - fila compacta debajo */}
+        <div className="flex md:hidden mt-1.5 pt-1.5 border-t border-white/5 justify-between">
+          <Button size="icon" variant="ghost" className="h-6 w-6 hover:bg-primary/20 hover:text-primary" onClick={() => startEditCloudBook(cb)}><Pencil className="w-3 h-3" /></Button>
+          <Button size="icon" variant="ghost" className="h-6 w-6 hover:bg-cyan-600/20 hover:text-cyan-400" onClick={() => openShareDialog(cb)}><Share2 className="w-3 h-3" /></Button>
+          {cb.share_count > 0 && (
+            <>
+              <Button size="icon" variant="ghost" className="h-6 w-6 hover:bg-yellow-600/20 hover:text-yellow-400" onClick={async () => { const raceId = await createRace(cb.id); if (raceId) { loadLeaderboard(raceId); } }}><Flag className="w-3 h-3" /></Button>
+              <Button size="icon" variant="ghost" className="h-6 w-6 hover:bg-purple-600/20 hover:text-purple-400" onClick={() => setShowChallengeDialog(cb)}><Swords className="w-3 h-3" /></Button>
+            </>
+          )}
+          <Button size="icon" variant="ghost" className="h-6 w-6 hover:bg-green-600/20 hover:text-green-400" disabled={downloadingBookId === cb.id} onClick={() => downloadBookFromCloud(cb)}>
+            {downloadingBookId === cb.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <CloudDownload className="w-3 h-3" />}
+          </Button>
+          <Button size="icon" variant="ghost" className="h-6 w-6 hover:bg-red-600/20 hover:text-red-400" onClick={() => deleteCloudBook(cb.id)}><Trash2 className="w-3 h-3" /></Button>
+        </div>
+        {cb.share_count > 0 && sharedProgressMap[cb.id]?.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-white/5 space-y-1">
+            {(() => {
+              const me = { user_id: -1, username: t('cloud.me'), avatar: null, progress_percent: cb.progress_percent, current_chapter: 0, current_page: 0, last_read: null };
+              const allRunners = [me, ...sharedProgressMap[cb.id]].sort((a, b) => b.progress_percent - a.progress_percent);
+              return allRunners.map((sp, idx) => {
+                const isMe = sp.user_id === -1;
+                const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : null;
+                const barColor = isMe ? 'bg-primary' : 'bg-cyan-400';
+                const textColor = isMe ? 'text-primary' : 'text-cyan-400';
+                const bgColor = isMe ? 'bg-primary/10 border-primary/20' : 'bg-white/[0.02] border-transparent';
+                return (
+                  <div key={sp.user_id} className={`flex items-center gap-1.5 md:gap-2 rounded-lg px-2 md:px-2.5 py-1.5 border ${bgColor} transition-all`}>
+                    <span className="text-[10px] md:text-xs w-4 md:w-5 text-center shrink-0">{medal ?? `${idx + 1}`}</span>
+                    <div className={`w-4 h-4 md:w-5 md:h-5 rounded-full ${isMe ? 'bg-primary/20' : 'bg-cyan-400/20'} flex items-center justify-center shrink-0`}>
+                      <User className={`w-2 h-2 md:w-2.5 md:h-2.5 ${textColor}`} />
+                    </div>
+                    <span className={`text-[9px] md:text-[10px] font-bold w-12 md:w-16 truncate shrink-0 ${isMe ? 'text-primary' : ''}`}>{sp.username}</span>
+                    <div className="flex-1 min-w-0 h-2 md:h-2.5 bg-white/5 rounded-full overflow-hidden relative">
+                      <div className={`h-full rounded-full transition-all duration-700 ${barColor}`} style={{ width: `${sp.progress_percent}%` }} />
+                    </div>
+                    <span className={`text-[9px] md:text-[10px] font-bold w-8 md:w-9 text-right shrink-0 ${textColor}`}>{sp.progress_percent}%</span>
+                  </div>
+                );
+              });
+            })()}
+          </div>
+        )}
+      </Card>
+    );
+  }
+
   // Auto-refresh al entrar a la pestaña Nube
   useEffect(() => {
     if (authUser) {
@@ -86,11 +173,11 @@ export function CloudView() {
 
   return (
     <ScrollArea className="flex-1">
-      <div className="max-w-2xl mx-auto p-4 md:p-12 space-y-8">
+      <div className="w-full max-w-2xl mx-auto px-3 py-4 md:p-12 space-y-8">
         <div className="space-y-3">
-          <h2 className="text-lg font-bold flex items-center gap-2"><Server className="w-5 h-5 text-primary" /> {t('cloud.apiServer')}</h2>
+          <h2 className="text-lg font-bold flex items-center gap-2"><Server className="w-5 h-5 text-primary shrink-0" /> <span className="truncate">{t('cloud.apiServer')}</span></h2>
           <div className="flex gap-2">
-            <input type="url" defaultValue={api.getApiUrl()} id="api-url-input" placeholder="http://tu-servidor.com" className="flex-1 bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-sm focus:border-primary outline-none" />
+            <input type="url" defaultValue={api.getApiUrl()} id="api-url-input" placeholder="http://tu-servidor.com" className="flex-1 min-w-0 bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-sm focus:border-primary outline-none" />
             <Button variant="outline" size="sm" onClick={() => { const input = document.getElementById('api-url-input') as HTMLInputElement; api.setApiUrl(input.value); }}>{t('app.save')}</Button>
           </div>
         </div>
@@ -122,14 +209,14 @@ export function CloudView() {
           <div className="space-y-8">
             {pendingShares.length > 0 && (
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-lg font-bold flex items-center gap-2"><Bell className="w-5 h-5 text-amber-400" /> {t('cloud.invitations', { count: pendingShares.length })}</h2>
-                  <Button variant="ghost" size="sm" onClick={() => setShowInvitations(prev => !prev)} className="text-xs opacity-50">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h2 className="text-lg font-bold flex items-center gap-2 min-w-0"><Bell className="w-5 h-5 text-amber-400 shrink-0" /> <span className="truncate">{t('cloud.invitations', { count: pendingShares.length })}</span></h2>
+                  <Button variant="ghost" size="sm" onClick={() => setShowInvitations(prev => !prev)} className="text-xs opacity-50 shrink-0">
                     {showInvitations ? <><ChevronUp className="w-3 h-3 mr-1" /> {t('app.hide')}</> : <><ChevronDown className="w-3 h-3 mr-1" /> {t('app.show')}</>}
                   </Button>
                 </div>
                 {showInvitations && pendingShares.map(share => (
-                  <Card key={share.id} className="bg-amber-500/5 border-amber-500/20 p-3 md:p-4 space-y-2 md:space-y-3">
+                  <Card key={share.id} className="bg-amber-500/5 border-amber-500/20 p-3 md:p-4 space-y-2 md:space-y-3 overflow-hidden">
                     <div className="flex gap-3 md:gap-4">
                       <div className="w-10 md:w-12 aspect-[2/3] rounded bg-[#0f0f14] overflow-hidden shrink-0 border border-white/10 flex items-center justify-center">
                         {share.snap_cover_base64 ? <img src={coverSrc(share.snap_cover_base64)} className="w-full h-full object-contain" alt="" /> : <BookOpen className="w-4 h-4 opacity-10" />}
@@ -156,19 +243,19 @@ export function CloudView() {
               </div>
             )}
 
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-bold flex items-center gap-2"><Cloud className="w-5 h-5 text-blue-400" /> {t('cloud.myCloudBooks')}</h2>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="min-w-0">
+                <h2 className="text-lg font-bold flex items-center gap-2"><Cloud className="w-5 h-5 text-blue-400 shrink-0" /> <span className="truncate">{t('cloud.myCloudBooks')}</span></h2>
                 <p className="text-xs opacity-50 mt-1">{t('cloud.syncedBooks', { count: cloudBooks.length })}</p>
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-2 shrink-0">
                 {hasDuplicates && (
                   <Button variant="outline" size="sm" className="text-amber-400 border-amber-400/40 hover:bg-amber-400/10" onClick={() => setShowDedupConfirm(true)}>
-                    <AlertTriangle className="w-4 h-4 mr-2" /> {t('cloud.dedupButton')}
+                    <AlertTriangle className="w-4 h-4 md:mr-2" /> <span className="hidden md:inline">{t('cloud.dedupButton')}</span>
                   </Button>
                 )}
-                <Button variant="outline" size="sm" onClick={loadCloudBooks} disabled={cloudLoading}>
-                  {cloudLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Cloud className="w-4 h-4 mr-2" />} {t('app.refresh')}
+                <Button variant="outline" size="sm" onClick={() => loadCloudBooks()} disabled={cloudLoading}>
+                  {cloudLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Cloud className="w-4 h-4 md:mr-2" />} <span className="hidden md:inline">{t('app.refresh')}</span>
                 </Button>
               </div>
             </div>
@@ -180,92 +267,44 @@ export function CloudView() {
                 <p className="text-xs mt-1">{t('cloud.noCloudBooksDesc')}</p>
               </div>
             ) : (
-              <div className="space-y-3">
-                {cloudBooks.map(cb => (
-                  <Card key={cb.id} className="bg-white/5 border-white/5 p-3 md:p-4 space-y-0">
-                    <div className="flex gap-3 md:gap-4 items-center">
-                      <div className="w-10 md:w-12 aspect-[2/3] rounded bg-[#0f0f14] overflow-hidden shrink-0 border border-white/10 flex items-center justify-center">
-                        {cb.cover_base64 ? <img src={coverSrc(cb.cover_base64)} className="w-full h-full object-contain" alt="" /> : <BookOpen className="w-4 h-4 opacity-10" />}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <h3 className="text-sm font-bold truncate">{cb.title}</h3>
-                        <p className="text-[10px] opacity-50 italic">{cb.author || t('app.noAuthor')}</p>
-                        <div className="flex items-center gap-2 md:gap-3 mt-1 flex-wrap">
-                          {!(cb.share_count > 0 && sharedProgressMap[cb.id]?.length > 0) && (
-                            <>
-                              <Progress value={cb.progress_percent} className="h-1 flex-1 max-w-[100px] md:max-w-[120px] bg-white/5" indicatorClassName="bg-blue-400" />
-                              <span className="text-[9px] font-bold text-blue-400">{cb.progress_percent}%</span>
-                            </>
-                          )}
-                          <Badge variant="outline" className="text-[8px] h-4 opacity-50">{cb.file_type}</Badge>
-                          {cb.is_duplicate && <Badge variant="outline" className="text-[8px] h-4 text-amber-400 border-amber-400/40">{t('cloud.duplicate')}</Badge>}
-                          {cb.share_count > 0 && <Badge variant="outline" className="text-[8px] h-4 text-cyan-400 border-cyan-400/40"><Users className="w-2.5 h-2.5 mr-0.5" /> {t('cloud.shared')}</Badge>}
+              <>
+                {/* Libros compartidos */}
+                {(() => {
+                  const sharedBooks = cloudBooks.filter(b => b.share_count > 0);
+                  const personalBooks = cloudBooks.filter(b => b.share_count === 0);
+                  return (
+                    <>
+                      {sharedBooks.length > 0 && (
+                        <div className="space-y-3">
+                          <h3 className="text-sm font-bold flex items-center gap-2 text-cyan-400">
+                            <Users className="w-4 h-4" /> {t('cloud.sharedSection')}
+                            <Badge variant="outline" className="text-[9px] h-4 text-cyan-400 border-cyan-400/30 ml-1">{sharedBooks.length}</Badge>
+                          </h3>
+                          <div className="space-y-3">
+                            {sharedBooks.map(cb => renderCloudBook(cb, 'shared'))}
+                          </div>
+                          {personalBooks.length > 0 && <Separator className="opacity-10" />}
                         </div>
-                      </div>
-                      {/* Botones solo en desktop - inline */}
-                      <div className="hidden md:flex gap-1 shrink-0">
-                        <Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-primary/20 hover:text-primary" onClick={() => startEditCloudBook(cb)}><Pencil className="w-4 h-4" /></Button></TooltipTrigger><TooltipContent>{t('cloud.editTooltip')}</TooltipContent></Tooltip>
-                        <Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-cyan-600/20 hover:text-cyan-400" onClick={() => openShareDialog(cb)}><Share2 className="w-4 h-4" /></Button></TooltipTrigger><TooltipContent>{t('cloud.shareTooltip')}</TooltipContent></Tooltip>
-                        {cb.share_count > 0 && (
-                          <>
-                            <Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-yellow-600/20 hover:text-yellow-400" onClick={async () => { const raceId = await createRace(cb.id); if (raceId) { loadLeaderboard(raceId); } }}><Flag className="w-4 h-4" /></Button></TooltipTrigger><TooltipContent>{t('cloud.startRace')}</TooltipContent></Tooltip>
-                            <Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-purple-600/20 hover:text-purple-400" onClick={() => setShowChallengeDialog(cb)}><Swords className="w-4 h-4" /></Button></TooltipTrigger><TooltipContent>{t('cloud.challengeTooltip')}</TooltipContent></Tooltip>
-                          </>
-                        )}
-                        <Tooltip><TooltipTrigger asChild>
-                          <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-green-600/20 hover:text-green-400" disabled={downloadingBookId === cb.id} onClick={() => downloadBookFromCloud(cb)}>
-                            {downloadingBookId === cb.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <CloudDownload className="w-4 h-4" />}
-                          </Button>
-                        </TooltipTrigger><TooltipContent>{t('cloud.downloadTooltip')}</TooltipContent></Tooltip>
-                        <Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-red-600/20 hover:text-red-400" onClick={() => deleteCloudBook(cb.id)}><Trash2 className="w-4 h-4" /></Button></TooltipTrigger><TooltipContent>{t('cloud.deleteTooltip')}</TooltipContent></Tooltip>
-                      </div>
-                    </div>
-                    {/* Botones en mobile - fila compacta debajo */}
-                    <div className="flex md:hidden mt-1.5 pt-1.5 border-t border-white/5 justify-between">
-                      <Button size="icon" variant="ghost" className="h-6 w-6 hover:bg-primary/20 hover:text-primary" onClick={() => startEditCloudBook(cb)}><Pencil className="w-3 h-3" /></Button>
-                      <Button size="icon" variant="ghost" className="h-6 w-6 hover:bg-cyan-600/20 hover:text-cyan-400" onClick={() => openShareDialog(cb)}><Share2 className="w-3 h-3" /></Button>
-                      {cb.share_count > 0 && (
-                        <>
-                          <Button size="icon" variant="ghost" className="h-6 w-6 hover:bg-yellow-600/20 hover:text-yellow-400" onClick={async () => { const raceId = await createRace(cb.id); if (raceId) { loadLeaderboard(raceId); } }}><Flag className="w-3 h-3" /></Button>
-                          <Button size="icon" variant="ghost" className="h-6 w-6 hover:bg-purple-600/20 hover:text-purple-400" onClick={() => setShowChallengeDialog(cb)}><Swords className="w-3 h-3" /></Button>
-                        </>
                       )}
-                      <Button size="icon" variant="ghost" className="h-6 w-6 hover:bg-green-600/20 hover:text-green-400" disabled={downloadingBookId === cb.id} onClick={() => downloadBookFromCloud(cb)}>
-                        {downloadingBookId === cb.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <CloudDownload className="w-3 h-3" />}
-                      </Button>
-                      <Button size="icon" variant="ghost" className="h-6 w-6 hover:bg-red-600/20 hover:text-red-400" onClick={() => deleteCloudBook(cb.id)}><Trash2 className="w-3 h-3" /></Button>
-                    </div>
-                    {cb.share_count > 0 && sharedProgressMap[cb.id]?.length > 0 && (
-                      <div className="mt-3 pt-3 border-t border-white/5 space-y-1">
-                        {(() => {
-                          const me = { user_id: -1, username: t('cloud.me'), avatar: null, progress_percent: cb.progress_percent, current_chapter: 0, current_page: 0, last_read: null };
-                          const allRunners = [me, ...sharedProgressMap[cb.id]].sort((a, b) => b.progress_percent - a.progress_percent);
-                          return allRunners.map((sp, idx) => {
-                            const isMe = sp.user_id === -1;
-                            const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : null;
-                            const barColor = isMe ? 'bg-primary' : 'bg-cyan-400';
-                            const textColor = isMe ? 'text-primary' : 'text-cyan-400';
-                            const bgColor = isMe ? 'bg-primary/10 border-primary/20' : 'bg-white/[0.02] border-transparent';
-                            return (
-                              <div key={sp.user_id} className={`flex items-center gap-2 rounded-lg px-2.5 py-1.5 border ${bgColor} transition-all`}>
-                                <span className="text-xs w-5 text-center shrink-0">{medal ?? `${idx + 1}`}</span>
-                                <div className={`w-5 h-5 rounded-full ${isMe ? 'bg-primary/20' : 'bg-cyan-400/20'} flex items-center justify-center shrink-0`}>
-                                  <User className={`w-2.5 h-2.5 ${textColor}`} />
-                                </div>
-                                <span className={`text-[10px] font-bold w-16 truncate shrink-0 ${isMe ? 'text-primary' : ''}`}>{sp.username}</span>
-                                <div className="flex-1 h-2.5 bg-white/5 rounded-full overflow-hidden relative">
-                                  <div className={`h-full rounded-full transition-all duration-700 ${barColor}`} style={{ width: `${sp.progress_percent}%` }} />
-                                </div>
-                                <span className={`text-[10px] font-bold w-9 text-right shrink-0 ${textColor}`}>{sp.progress_percent}%</span>
-                              </div>
-                            );
-                          });
-                        })()}
-                      </div>
-                    )}
-                  </Card>
-                ))}
-              </div>
+
+                      {/* Libros personales */}
+                      {personalBooks.length > 0 && (
+                        <div className="space-y-3">
+                          {sharedBooks.length > 0 && (
+                            <h3 className="text-sm font-bold flex items-center gap-2 opacity-60">
+                              <Cloud className="w-4 h-4" /> {t('cloud.personalSection')}
+                              <Badge variant="outline" className="text-[9px] h-4 opacity-50 ml-1">{personalBooks.length}</Badge>
+                            </h3>
+                          )}
+                          <div className="space-y-3">
+                            {personalBooks.map(cb => renderCloudBook(cb, 'personal'))}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </>
             )}
           </div>
         )}
@@ -275,9 +314,9 @@ export function CloudView() {
           <>
             <Separator className="opacity-10" />
             <div className="space-y-3">
-              <h2 className="text-lg font-bold flex items-center gap-2"><Bell className="w-5 h-5 text-purple-400" /> Invitaciones de colecciones ({pendingCollectionShares.length})</h2>
+              <h2 className="text-lg font-bold flex items-center gap-2 min-w-0"><Bell className="w-5 h-5 text-purple-400 shrink-0" /> <span className="truncate">Invitaciones de colecciones ({pendingCollectionShares.length})</span></h2>
               {pendingCollectionShares.map(share => (
-                <Card key={share.id} className="bg-purple-500/5 border-purple-500/20 p-3 md:p-4 space-y-2">
+                <Card key={share.id} className="bg-purple-500/5 border-purple-500/20 p-3 md:p-4 space-y-2 overflow-hidden">
                   <div className="flex gap-3 items-center">
                     <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${share.snap_type === 'saga' ? 'bg-amber-400/10' : 'bg-blue-400/10'}`}>
                       {share.snap_type === 'saga' ? <FolderOpen className="w-5 h-5 text-amber-400" /> : <Layers className="w-5 h-5 text-blue-400" />}
@@ -307,15 +346,15 @@ export function CloudView() {
           <>
             <Separator className="opacity-10" />
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h2 className="text-lg font-bold flex items-center gap-2"><Layers className="w-5 h-5 text-blue-400" /> Colecciones</h2>
-                <Button variant="outline" size="sm" className="text-xs gap-1" onClick={() => setShowNewCollectionForm(v => !v)}>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-lg font-bold flex items-center gap-2 min-w-0"><Layers className="w-5 h-5 text-blue-400 shrink-0" /> <span className="truncate">Colecciones</span></h2>
+                <Button variant="outline" size="sm" className="text-xs gap-1 shrink-0" onClick={() => setShowNewCollectionForm(v => !v)}>
                   <Plus className="w-3 h-3" /> Nueva
                 </Button>
               </div>
 
               {showNewCollectionForm && (
-                <Card className="bg-white/5 border-white/10 p-4 space-y-3">
+                <Card className="bg-white/5 border-white/10 p-4 space-y-3 overflow-hidden">
                   <input
                     value={newCollectionName}
                     onChange={e => setNewCollectionName(e.target.value)}
@@ -323,11 +362,11 @@ export function CloudView() {
                     className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-sm focus:border-primary outline-none"
                   />
                   <div className="flex gap-2">
-                    <Button variant={newCollectionType === 'collection' ? 'secondary' : 'ghost'} className="flex-1 text-xs h-8" onClick={() => setNewCollectionType('collection')}>
-                      <Layers className="w-3 h-3 mr-1" /> Colección
+                    <Button variant={newCollectionType === 'collection' ? 'secondary' : 'ghost'} className="flex-1 text-[10px] md:text-xs h-8" onClick={() => setNewCollectionType('collection')}>
+                      <Layers className="w-3 h-3 mr-1 shrink-0" /> <span className="truncate">Colección</span>
                     </Button>
-                    <Button variant={newCollectionType === 'saga' ? 'secondary' : 'ghost'} className="flex-1 text-xs h-8" onClick={() => setNewCollectionType('saga')}>
-                      <FolderOpen className="w-3 h-3 mr-1" /> Saga
+                    <Button variant={newCollectionType === 'saga' ? 'secondary' : 'ghost'} className="flex-1 text-[10px] md:text-xs h-8" onClick={() => setNewCollectionType('saga')}>
+                      <FolderOpen className="w-3 h-3 mr-1 shrink-0" /> <span className="truncate">Saga</span>
                     </Button>
                   </div>
                   <div className="flex gap-2">
@@ -346,7 +385,7 @@ export function CloudView() {
               ) : (
                 <div className="space-y-2">
                   {cloudCollections.map(col => (
-                    <Card key={col.id} className="bg-white/5 border-white/5 p-3 md:p-4">
+                    <Card key={col.id} className="bg-white/5 border-white/5 p-3 md:p-4 overflow-hidden">
                       <div className="flex gap-3 items-center">
                         <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${col.type === 'saga' ? 'bg-amber-400/10' : 'bg-blue-400/10'}`}>
                           {col.type === 'saga' ? <FolderOpen className="w-5 h-5 text-amber-400" /> : <Layers className="w-5 h-5 text-blue-400" />}
@@ -355,20 +394,20 @@ export function CloudView() {
                           <h3 className="text-sm font-bold truncate">{col.name}</h3>
                           <p className="text-[10px] opacity-40">{col.book_count} {col.book_count === 1 ? 'libro' : 'libros'} · {col.type}</p>
                         </div>
-                        <div className="flex gap-1">
+                        <div className="flex gap-1 shrink-0">
                           <Tooltip><TooltipTrigger asChild>
-                            <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-green-600/20 hover:text-green-400" onClick={() => setAddingToCollectionId(addingToCollectionId === col.id ? null : col.id)}>
-                              <Plus className="w-4 h-4" />
+                            <Button size="icon" variant="ghost" className="h-7 w-7 md:h-8 md:w-8 hover:bg-green-600/20 hover:text-green-400" onClick={() => setAddingToCollectionId(addingToCollectionId === col.id ? null : col.id)}>
+                              <Plus className="w-3.5 h-3.5 md:w-4 md:h-4" />
                             </Button>
                           </TooltipTrigger><TooltipContent>Agregar libros</TooltipContent></Tooltip>
                           <Tooltip><TooltipTrigger asChild>
-                            <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-cyan-600/20 hover:text-cyan-400" onClick={() => setSharingCollection(col)}>
-                              <Share2 className="w-4 h-4" />
+                            <Button size="icon" variant="ghost" className="h-7 w-7 md:h-8 md:w-8 hover:bg-cyan-600/20 hover:text-cyan-400" onClick={() => setSharingCollection(col)}>
+                              <Share2 className="w-3.5 h-3.5 md:w-4 md:h-4" />
                             </Button>
                           </TooltipTrigger><TooltipContent>Compartir colección</TooltipContent></Tooltip>
                           <Tooltip><TooltipTrigger asChild>
-                            <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-red-600/20 hover:text-red-400" onClick={() => deleteCloudCollection(col.id)}>
-                              <Trash2 className="w-4 h-4" />
+                            <Button size="icon" variant="ghost" className="h-7 w-7 md:h-8 md:w-8 hover:bg-red-600/20 hover:text-red-400" onClick={() => deleteCloudCollection(col.id)}>
+                              <Trash2 className="w-3.5 h-3.5 md:w-4 md:h-4" />
                             </Button>
                           </TooltipTrigger><TooltipContent>Eliminar</TooltipContent></Tooltip>
                         </div>
@@ -448,10 +487,10 @@ export function CloudView() {
           <>
             <Separator className="opacity-10" />
             <div className="space-y-3">
-              <h2 className="text-lg font-bold flex items-center gap-2"><Swords className="w-5 h-5 text-purple-400" /> {t('cloud.challenges')}</h2>
-              <div className="flex bg-white/5 rounded-lg p-1 gap-1">
+              <h2 className="text-lg font-bold flex items-center gap-2 min-w-0"><Swords className="w-5 h-5 text-purple-400 shrink-0" /> <span className="truncate">{t('cloud.challenges')}</span></h2>
+              <div className="flex bg-white/5 rounded-lg p-1 gap-1 overflow-x-auto">
                 {(['pending', 'active', 'history'] as const).map(tab => (
-                  <Button key={tab} variant={challengeTab === tab ? 'secondary' : 'ghost'} className="flex-1 text-xs h-7" onClick={() => setChallengeTab(tab)}>
+                  <Button key={tab} variant={challengeTab === tab ? 'secondary' : 'ghost'} className="flex-1 text-[10px] md:text-xs h-7 px-2 md:px-3 whitespace-nowrap" onClick={() => setChallengeTab(tab)}>
                     {tab === 'pending' ? t('cloud.pendingTab') : tab === 'active' ? t('cloud.activeTab') : t('cloud.historyTab')}
                     {tab === 'pending' && pendingChallenges > 0 && <span className="ml-1 bg-red-500 text-white text-[8px] rounded-full w-4 h-4 flex items-center justify-center">{pendingChallenges}</span>}
                   </Button>
@@ -522,8 +561,8 @@ export function CloudView() {
                 <div className="space-y-2">
                   <label className="text-xs font-bold uppercase opacity-50 tracking-widest">{t('cloud.challengeType')}</label>
                   <div className="flex gap-2">
-                    <Button variant={challengeForm.challenge_type === 'finish_before' ? 'secondary' : 'ghost'} className="flex-1 text-xs h-8" onClick={() => setChallengeForm(f => ({ ...f, challenge_type: 'finish_before' }))}>{t('cloud.finishFirst')}</Button>
-                    <Button variant={challengeForm.challenge_type === 'chapters_in_days' ? 'secondary' : 'ghost'} className="flex-1 text-xs h-8" onClick={() => setChallengeForm(f => ({ ...f, challenge_type: 'chapters_in_days' }))}>{t('cloud.chaptersInDays')}</Button>
+                    <Button variant={challengeForm.challenge_type === 'finish_before' ? 'secondary' : 'ghost'} className="flex-1 text-[10px] md:text-xs h-8 px-2 whitespace-nowrap" onClick={() => setChallengeForm(f => ({ ...f, challenge_type: 'finish_before' }))}>{t('cloud.finishFirst')}</Button>
+                    <Button variant={challengeForm.challenge_type === 'chapters_in_days' ? 'secondary' : 'ghost'} className="flex-1 text-[10px] md:text-xs h-8 px-2 whitespace-nowrap" onClick={() => setChallengeForm(f => ({ ...f, challenge_type: 'chapters_in_days' }))}>{t('cloud.chaptersInDays')}</Button>
                   </div>
                 </div>
                 <div className="flex gap-3">

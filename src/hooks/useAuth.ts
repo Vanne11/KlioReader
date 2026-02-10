@@ -52,6 +52,8 @@ export function useAuth() {
     setPendingSharesCount(0);
     setPendingShares([]);
     setSharedProgressMap({});
+    // Limpiar caché de libros en la nube
+    useCloudStore.getState().clearCloudCache();
   }
 
   async function loadProfile(openModal = true) {

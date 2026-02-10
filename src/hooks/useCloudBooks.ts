@@ -25,6 +25,7 @@ export function useCloudBooks() {
   const { t } = useT();
   const {
     cloudBooks, setCloudBooks, setCloudBooksReady, setCloudLoading,
+    setCloudDigestHash, cloudDigestHash,
     setDownloadingBookId, downloadingBookId,
     setEditingCloudBook, editCloudForm, editingCloudBook, setEditCloudForm,
   } = useCloudStore();
@@ -33,8 +34,25 @@ export function useCloudBooks() {
   const { showAlert } = useUIStore();
   const { setSettingsTab } = useSettingsStore();
 
-  async function loadCloudBooks() {
+  async function loadCloudBooks(forceRefresh = false) {
     if (!api.isLoggedIn()) return;
+
+    // Paso 1: Verificar digest — si no cambió nada, usar caché
+    if (!forceRefresh) {
+      try {
+        const digest = await api.getBooksDigest();
+        if (digest.hash === cloudDigestHash && cloudBooks.length > 0) {
+          // No hay cambios — solo refrescar stats/badges en background
+          refreshStatsOnly();
+          return;
+        }
+        // Hash cambió → necesitamos recargar
+        setCloudDigestHash(digest.hash);
+      } catch {
+        // Si falla el digest (servidor viejo?), recargar normal
+      }
+    }
+
     setCloudLoading(true);
     try {
       const [cloudBooksList, cloudStats, socialStatsRaw] = await Promise.all([
@@ -42,42 +60,78 @@ export function useCloudBooks() {
         api.getStats().catch(() => null),
         api.getSocialStats().catch(() => null),
       ]);
+
+      // Merge covers: si tenemos portadas en caché, preservarlas
+      const cachedCovers = new Map<number, string | null>();
+      for (const cb of cloudBooks) {
+        if (cb.cover_base64) cachedCovers.set(cb.id, cb.cover_base64);
+      }
+      for (const book of cloudBooksList) {
+        if (!book.cover_base64 && cachedCovers.has(book.id)) {
+          book.cover_base64 = cachedCovers.get(book.id)!;
+        }
+      }
+
       setCloudBooks(cloudBooksList);
       setCloudBooksReady(true);
 
+      // Guardar nuevo digest y persistir caché
+      const newDigest = await api.getBooksDigest().catch(() => null);
+      if (newDigest) {
+        setCloudDigestHash(newDigest.hash);
+      }
+      // Persistir en localStorage después de actualizar el hash
+      setTimeout(() => useCloudStore.getState().persistCache(), 0);
+
       cloudSyncingRef = true;
-      // Process social stats first so they're available for badge evaluation
-      const socialForBadges = socialStatsRaw ? {
-        booksShared: Number(socialStatsRaw.books_shared) || 0,
-        racesWon: Number(socialStatsRaw.races_won) || 0,
-        racesParticipated: Number(socialStatsRaw.races_participated) || 0,
-        challengesCompleted: Number(socialStatsRaw.challenges_completed) || 0,
-        challengesCreated: Number(socialStatsRaw.challenges_created) || 0,
-        sharedNotesCount: Number(socialStatsRaw.shared_notes_count) || 0,
-      } : undefined;
-      if (socialForBadges) {
-        setSocialStats(socialForBadges);
-      }
-      if (cloudStats) {
-        const remote = statsFromApi(cloudStats);
-        const currentBooks = useLibraryStore.getState().books;
-        const booksForBadges = currentBooks.map((b: any) => ({ progress: b.progress }));
-        const remoteBadges = getUnlockedBadges(remote, booksForBadges, socialForBadges).map(b => b.id);
-        const savedRaw = localStorage.getItem('klioUnlockedBadges');
-        const previousIds: string[] = savedRaw ? JSON.parse(savedRaw) : [];
-        const merged = [...new Set([...previousIds, ...remoteBadges])];
-        localStorage.setItem('klioUnlockedBadges', JSON.stringify(merged));
-        setStats(prev => remote.xp >= prev.xp ? remote : prev);
-      }
-      if (cloudStats?.selected_title_id) {
-        setSelectedTitleId(cloudStats.selected_title_id);
-      }
+      processStatsAndBadges(cloudStats, socialStatsRaw);
       setTimeout(() => { cloudSyncingRef = false; }, 0);
       autoEnqueueNewBooks(useLibraryStore.getState().books, cloudBooksList);
     } catch (err: any) {
       showAlert('error', 'Error al cargar libros', err.message || 'No se pudieron cargar los libros de la nube');
     } finally {
       setCloudLoading(false);
+    }
+  }
+
+  // Refrescar solo stats sin recargar libros
+  async function refreshStatsOnly() {
+    try {
+      const [cloudStats, socialStatsRaw] = await Promise.all([
+        api.getStats().catch(() => null),
+        api.getSocialStats().catch(() => null),
+      ]);
+      processStatsAndBadges(cloudStats, socialStatsRaw);
+      // Aun sin cambios en libros, auto-enqueue si hay libros locales nuevos
+      autoEnqueueNewBooks(useLibraryStore.getState().books, cloudBooks);
+    } catch {}
+  }
+
+  function processStatsAndBadges(cloudStats: api.UserStats | null, socialStatsRaw: api.SocialStats | null) {
+    const socialForBadges = socialStatsRaw ? {
+      booksShared: Number(socialStatsRaw.books_shared) || 0,
+      racesWon: Number(socialStatsRaw.races_won) || 0,
+      racesParticipated: Number(socialStatsRaw.races_participated) || 0,
+      challengesCompleted: Number(socialStatsRaw.challenges_completed) || 0,
+      challengesCreated: Number(socialStatsRaw.challenges_created) || 0,
+      sharedNotesCount: Number(socialStatsRaw.shared_notes_count) || 0,
+    } : undefined;
+    if (socialForBadges) {
+      setSocialStats(socialForBadges);
+    }
+    if (cloudStats) {
+      const remote = statsFromApi(cloudStats);
+      const currentBooks = useLibraryStore.getState().books;
+      const booksForBadges = currentBooks.map((b: any) => ({ progress: b.progress }));
+      const remoteBadges = getUnlockedBadges(remote, booksForBadges, socialForBadges).map(b => b.id);
+      const savedRaw = localStorage.getItem('klioUnlockedBadges');
+      const previousIds: string[] = savedRaw ? JSON.parse(savedRaw) : [];
+      const merged = [...new Set([...previousIds, ...remoteBadges])];
+      localStorage.setItem('klioUnlockedBadges', JSON.stringify(merged));
+      setStats(prev => remote.xp >= prev.xp ? remote : prev);
+    }
+    if (cloudStats?.selected_title_id) {
+      setSelectedTitleId(cloudStats.selected_title_id);
     }
   }
 
@@ -155,7 +209,10 @@ export function useCloudBooks() {
   async function deleteCloudBook(id: number) {
     try {
       await api.deleteBook(id);
+      // Actualizar caché local directamente sin re-fetch
       setCloudBooks((prev: CloudBook[]) => prev.filter(b => b.id !== id));
+      setCloudDigestHash(null); // Invalidar digest para que el próximo load recargue
+      setTimeout(() => useCloudStore.getState().persistCache(), 0);
       showAlert('success', 'Libro eliminado', 'El libro se eliminó de la nube. El progreso de lectura fue archivado.');
     } catch (err: any) {
       showAlert('error', 'Error al eliminar', err.message || 'No se pudo eliminar el libro');
@@ -171,8 +228,15 @@ export function useCloudBooks() {
     if (!editingCloudBook) return;
     try {
       await api.updateBook(editingCloudBook.id, editCloudForm);
+      // Actualizar caché local directamente
+      setCloudBooks((prev: CloudBook[]) => prev.map(b =>
+        b.id === editingCloudBook.id
+          ? { ...b, title: editCloudForm.title, author: editCloudForm.author, description: editCloudForm.description }
+          : b
+      ));
       setEditingCloudBook(null);
-      loadCloudBooks();
+      setCloudDigestHash(null); // Invalidar digest
+      setTimeout(() => useCloudStore.getState().persistCache(), 0);
     } catch (err: any) {
       showAlert('error', 'Error al editar', err.message || 'No se pudo actualizar el libro');
     }
@@ -182,7 +246,7 @@ export function useCloudBooks() {
     try {
       const result = await api.removeDuplicates();
       if (result.removed > 0) {
-        await loadCloudBooks();
+        await loadCloudBooks(true); // Forzar recarga
         showAlert('success', t('cloud.dedupDoneTitle'), t('cloud.dedupDoneDesc', { count: String(result.removed) }));
       } else {
         showAlert('info', t('cloud.dedupNoneTitle'), t('cloud.dedupNoneDesc'));

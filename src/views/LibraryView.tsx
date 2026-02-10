@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import {
   BookOpen, Flame, LayoutGrid, Grid2X2, List, Square, Pencil,
   Loader2, FolderOpen, Settings2, Layers, Plus, ArrowLeft, Trash2,
+  Users, User, ChevronDown, ChevronUp, Play,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -14,10 +16,13 @@ import { useLibraryStore } from '@/stores/libraryStore';
 import { useReaderStore } from '@/stores/readerStore';
 import { useGamificationStore } from '@/stores/gamificationStore';
 import { useCloudStore } from '@/stores/cloudStore';
+import { useSharesStore } from '@/stores/sharesStore';
+import { useAuthStore } from '@/stores/authStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useCollectionsStore } from '@/stores/collectionsStore';
 import { useLibrary } from '@/hooks/useLibrary';
+import { useReader } from '@/hooks/useReader';
 import { useCollections } from '@/hooks/useCollections';
 import { coverSrc, getCollectionCoverSrc } from '@/lib/utils';
 import { useT } from '@/i18n';
@@ -130,15 +135,13 @@ function CollectionCard({ collection, coverUrl, onClick, onEdit }: {
       onClick={onClick}
     >
       {coverUrl ? (
-        <div className="flex flex-col">
-          <div className="aspect-[3/2] relative overflow-hidden bg-black/60">
-            <img src={coverUrl} className="absolute inset-0 w-full h-full object-cover blur-xl opacity-50 scale-125" alt="" />
-            <img src={coverUrl} className="relative z-10 w-full h-full object-contain" alt="" />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent z-20" />
-            <div className="absolute bottom-2 left-3 right-3 z-30">
-              <h3 className="text-sm font-black truncate leading-tight">{collection.name}</h3>
-              <p className="text-[10px] opacity-50">{label}</p>
-            </div>
+        <div className="flex h-24">
+          <div className="w-16 shrink-0 overflow-hidden bg-black/40">
+            <img src={coverUrl} className="w-full h-full object-cover" alt="" />
+          </div>
+          <div className={`flex-1 p-3 flex flex-col justify-center ${isSaga ? 'bg-gradient-to-br from-amber-400/10 to-transparent' : 'bg-gradient-to-br from-blue-400/10 to-transparent'}`}>
+            <h3 className="text-sm font-bold truncate">{collection.name}</h3>
+            <p className="text-[10px] opacity-50 mt-0.5">{label}</p>
           </div>
         </div>
       ) : (
@@ -180,11 +183,16 @@ export function LibraryView() {
 
   const { setSelectedBook } = useReaderStore();
   const stats = useGamificationStore(s => s.stats);
+  const cloudBooks = useCloudStore(s => s.cloudBooks);
   const queueCount = useCloudStore(s => s.queueCount);
   const queueSummary = useCloudStore(s => s.queueSummary);
+  const sharedProgressMap = useSharesStore(s => s.sharedProgressMap);
+  const authUser = useAuthStore(s => s.authUser);
+  const [sharedProgressOpen, setSharedProgressOpen] = useState(true);
   const { setActiveTab } = useUIStore();
   const { setSettingsTab } = useSettingsStore();
   const { startEditLocalBook, saveLocalBookEdit } = useLibrary();
+  const { readBook } = useReader();
 
   const localCollections = useCollectionsStore(s => s.localCollections);
   const activeCollectionId = useCollectionsStore(s => s.activeCollectionId);
@@ -297,6 +305,82 @@ export function LibraryView() {
                 )}
               </div>
             )}
+
+            {/* Progreso Compartido (solo cuando no hay colección activa y hay datos) */}
+            {!activeCollection && authUser && (() => {
+              const sharedCloudBooks = cloudBooks.filter(b => b.share_count > 0 && sharedProgressMap[b.id]?.length > 0);
+              if (sharedCloudBooks.length === 0) return null;
+              return (
+                <div className="space-y-3">
+                  <button
+                    className="flex items-center gap-2 w-full text-left group"
+                    onClick={() => setSharedProgressOpen(v => !v)}
+                  >
+                    <Users className="w-4 h-4 text-cyan-400" />
+                    <span className="text-sm font-bold text-cyan-400">{t('cloud.sharedProgress')}</span>
+                    <Badge variant="outline" className="text-[9px] h-4 text-cyan-400 border-cyan-400/30">{sharedCloudBooks.length}</Badge>
+                    <span className="ml-auto opacity-40 group-hover:opacity-70 transition-opacity">
+                      {sharedProgressOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                    </span>
+                  </button>
+                  {sharedProgressOpen && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {sharedCloudBooks.map(cb => {
+                        const me = { user_id: -1, username: t('cloud.me'), avatar: null, progress_percent: cb.progress_percent, current_chapter: 0, current_page: 0, last_read: null };
+                        const allRunners = [me, ...sharedProgressMap[cb.id]].sort((a, b) => b.progress_percent - a.progress_percent);
+                        const localMatch = books.find(b => b.title.toLowerCase() === cb.title.toLowerCase() && b.author.toLowerCase() === cb.author.toLowerCase());
+                        return (
+                          <Card key={cb.id} className="bg-cyan-400/[0.03] border-cyan-400/10 p-3 space-y-2">
+                            <div className="flex gap-2.5 items-center">
+                              <div className="w-8 aspect-[2/3] rounded bg-[#0f0f14] overflow-hidden shrink-0 border border-white/10 flex items-center justify-center">
+                                {cb.cover_base64 ? <img src={coverSrc(cb.cover_base64)} className="w-full h-full object-contain" alt="" /> : <BookOpen className="w-3 h-3 opacity-10" />}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <h4 className="text-xs font-bold truncate">{cb.title}</h4>
+                                <p className="text-[9px] opacity-40 italic truncate">{cb.author}</p>
+                              </div>
+                              {localMatch && (
+                                <Button
+                                  size="sm"
+                                  className="h-7 px-2.5 gap-1 bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30 text-[10px] font-bold shrink-0"
+                                  onClick={() => readBook(localMatch)}
+                                >
+                                  <Play className="w-3 h-3 fill-current" />
+                                  {t('cloud.continueReading')}
+                                </Button>
+                              )}
+                            </div>
+                            <div className="space-y-0.5">
+                              {allRunners.map((sp, idx) => {
+                                const isMe = sp.user_id === -1;
+                                const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : null;
+                                const barColor = isMe ? 'bg-primary' : 'bg-cyan-400';
+                                const textColor = isMe ? 'text-primary' : 'text-cyan-400';
+                                const bgColor = isMe ? 'bg-primary/10 border-primary/20' : 'bg-white/[0.02] border-transparent';
+                                return (
+                                  <div key={sp.user_id} className={`flex items-center gap-1.5 rounded-md px-2 py-1 border ${bgColor} transition-all`}>
+                                    <span className="text-[9px] w-4 text-center shrink-0">{medal ?? `${idx + 1}`}</span>
+                                    <div className={`w-4 h-4 rounded-full ${isMe ? 'bg-primary/20' : 'bg-cyan-400/20'} flex items-center justify-center shrink-0`}>
+                                      <User className={`w-2 h-2 ${textColor}`} />
+                                    </div>
+                                    <span className={`text-[9px] font-bold w-12 truncate shrink-0 ${isMe ? 'text-primary' : ''}`}>{sp.username}</span>
+                                    <div className="flex-1 h-2 bg-white/5 rounded-full overflow-hidden">
+                                      <div className={`h-full rounded-full transition-all duration-700 ${barColor}`} style={{ width: `${sp.progress_percent}%` }} />
+                                    </div>
+                                    <span className={`text-[9px] font-bold w-8 text-right shrink-0 ${textColor}`}>{sp.progress_percent}%</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </Card>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <Separator className="opacity-10" />
+                </div>
+              );
+            })()}
 
             {/* Colecciones (solo cuando no hay colección activa) */}
             {!activeCollection && hasCollections && (

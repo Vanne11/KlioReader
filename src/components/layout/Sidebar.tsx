@@ -19,7 +19,7 @@ import { useCollectionsStore } from '@/stores/collectionsStore';
 import { useCloudStore } from '@/stores/cloudStore';
 import { useAuth } from '@/hooks/useAuth';
 import { useShares } from '@/hooks/useShares';
-import { getUserTitle, getBadgeImageUrl, RARITY_CONFIG } from '@/lib/gamification';
+import { getUserTitle, getBadgeImageUrl, RARITY_CONFIG, xpForNextLevel } from '@/lib/gamification';
 import { useT } from '@/i18n';
 
 interface SidebarProps {
@@ -139,7 +139,7 @@ export function Sidebar({ onClose }: SidebarProps) {
             );
           })()}
         </div>
-        <Progress value={((stats.xp % 100) / 100) * 100} className="h-1 mt-2" indicatorClassName="bg-amber-400" />
+        <Progress value={(() => { const cur = xpForNextLevel(stats.level - 1); const next = xpForNextLevel(stats.level); return next > cur ? ((stats.xp - cur) / (next - cur)) * 100 : 0; })()} className="h-1 mt-2" indicatorClassName="bg-amber-400" />
       </div>
     </aside>
   );

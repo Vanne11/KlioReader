@@ -100,7 +100,21 @@ export function useShares() {
 
   async function loadAllSharedProgress(books: CloudBook[]) {
     const shared = books.filter(b => b.share_count > 0);
-    await Promise.all(shared.map(b => loadSharedProgress(b.id)));
+    if (shared.length === 0) return;
+
+    // Usar endpoint batch: 1 llamada en vez de N
+    try {
+      const batchResult = await api.getBatchSharedProgress();
+      // batchResult es { "bookId": [progress, ...] }
+      const newMap: Record<number, api.SharedUserProgress[]> = {};
+      for (const [bookIdStr, progressList] of Object.entries(batchResult)) {
+        newMap[Number(bookIdStr)] = progressList;
+      }
+      setSharedProgressMap(newMap);
+    } catch {
+      // Fallback: cargar uno por uno si el batch no está disponible
+      await Promise.all(shared.map(b => loadSharedProgress(b.id)));
+    }
   }
 
   function toggleShareProgress(bookId: number) {

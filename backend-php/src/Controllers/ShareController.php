@@ -321,6 +321,142 @@ class ShareController
         echo json_encode($result);
     }
 
+    // GET /api/shared-progress/batch — progreso de TODOS los libros compartidos en una sola llamada
+    public function batchSharedProgress($params)
+    {
+        $userId = $params['user_id'];
+        $db = Database::get();
+
+        // 1. Obtener todas las relaciones aceptadas del usuario
+        $stmt = $db->prepare('
+            SELECT stored_file_id, from_user_id, to_user_id
+            FROM book_shares
+            WHERE status = ? AND (from_user_id = ? OR to_user_id = ?)
+        ');
+        $stmt->execute(array('accepted', $userId, $userId));
+        $relations = $stmt->fetchAll();
+
+        if (empty($relations)) {
+            echo json_encode(array());
+            return;
+        }
+
+        // 2. Agrupar usuarios conectados por stored_file_id
+        $fileUsers = array(); // stored_file_id => [user_ids]
+        foreach ($relations as $rel) {
+            $sfId = (int)$rel['stored_file_id'];
+            $otherId = ((int)$rel['from_user_id'] === (int)$userId) ? (int)$rel['to_user_id'] : (int)$rel['from_user_id'];
+            if (!isset($fileUsers[$sfId])) $fileUsers[$sfId] = array();
+            $fileUsers[$sfId][$otherId] = true;
+        }
+
+        // 3. Obtener los book_ids del usuario actual para mapear stored_file_id → book_id
+        $sfIds = array_keys($fileUsers);
+        $placeholders = implode(',', array_fill(0, count($sfIds), '?'));
+        $params2 = array_merge(array($userId), $sfIds);
+        $stmt = $db->prepare("SELECT id, stored_file_id FROM books WHERE user_id = ? AND stored_file_id IN ($placeholders)");
+        $stmt->execute($params2);
+        $myBooks = $stmt->fetchAll();
+
+        $sfIdToBookId = array();
+        foreach ($myBooks as $mb) {
+            $sfIdToBookId[(int)$mb['stored_file_id']] = (int)$mb['id'];
+        }
+
+        // 4. Recolectar todos los user_ids conectados
+        $allConnectedIds = array();
+        foreach ($fileUsers as $sfId => $users) {
+            foreach (array_keys($users) as $uid) {
+                $allConnectedIds[$uid] = true;
+            }
+        }
+
+        // 5. Obtener username/avatar de todos los usuarios conectados en una query
+        $connIds = array_keys($allConnectedIds);
+        $placeholders = implode(',', array_fill(0, count($connIds), '?'));
+        $stmt = $db->prepare("SELECT id, username, avatar FROM users WHERE id IN ($placeholders)");
+        $stmt->execute($connIds);
+        $usersInfo = array();
+        foreach ($stmt->fetchAll() as $u) {
+            $usersInfo[(int)$u['id']] = $u;
+        }
+
+        // 6. Obtener book_ids de los usuarios conectados para estos stored_file_ids
+        $theirBooks = array(); // "userId:storedFileId" => book_id
+        $allPairs = array();
+        foreach ($fileUsers as $sfId => $users) {
+            foreach (array_keys($users) as $uid) {
+                $allPairs[] = array($uid, $sfId);
+            }
+        }
+        // Query batch: buscar todos los books de usuarios conectados
+        if (!empty($allPairs)) {
+            $conditions = array();
+            $params3 = array();
+            foreach ($allPairs as $pair) {
+                $conditions[] = '(user_id = ? AND stored_file_id = ?)';
+                $params3[] = $pair[0];
+                $params3[] = $pair[1];
+            }
+            $stmt = $db->prepare('SELECT id, user_id, stored_file_id FROM books WHERE ' . implode(' OR ', $conditions));
+            $stmt->execute($params3);
+            foreach ($stmt->fetchAll() as $tb) {
+                $key = (int)$tb['user_id'] . ':' . (int)$tb['stored_file_id'];
+                $theirBooks[$key] = (int)$tb['id'];
+            }
+        }
+
+        // 7. Obtener progreso de lectura de todos esos book_ids
+        $allTheirBookIds = array_values($theirBooks);
+        $progressMap = array(); // book_id => progress
+        if (!empty($allTheirBookIds)) {
+            $placeholders = implode(',', array_fill(0, count($allTheirBookIds), '?'));
+            $stmt = $db->prepare("SELECT book_id, user_id, current_chapter, current_page, progress_percent, last_read FROM reading_progress WHERE book_id IN ($placeholders)");
+            $stmt->execute($allTheirBookIds);
+            foreach ($stmt->fetchAll() as $rp) {
+                $progressMap[(int)$rp['book_id']] = $rp;
+            }
+        }
+
+        // 8. Armar resultado: { bookId: [progress, ...] }
+        $result = array();
+        foreach ($fileUsers as $sfId => $users) {
+            $bookId = isset($sfIdToBookId[$sfId]) ? $sfIdToBookId[$sfId] : null;
+            if ($bookId === null) continue;
+
+            $entries = array();
+            foreach (array_keys($users) as $connId) {
+                $key = $connId . ':' . $sfId;
+                $theirBookId = isset($theirBooks[$key]) ? $theirBooks[$key] : null;
+                $userInfo = isset($usersInfo[$connId]) ? $usersInfo[$connId] : null;
+
+                $entry = array(
+                    'user_id' => (int)$connId,
+                    'username' => $userInfo ? $userInfo['username'] : '',
+                    'avatar' => $userInfo ? $userInfo['avatar'] : null,
+                    'progress_percent' => 0,
+                    'current_chapter' => 0,
+                    'current_page' => 0,
+                    'last_read' => null,
+                );
+
+                if ($theirBookId !== null && isset($progressMap[$theirBookId])) {
+                    $rp = $progressMap[$theirBookId];
+                    $entry['progress_percent'] = (int)$rp['progress_percent'];
+                    $entry['current_chapter'] = (int)$rp['current_chapter'];
+                    $entry['current_page'] = (int)$rp['current_page'];
+                    $entry['last_read'] = $rp['last_read'];
+                }
+
+                $entries[] = $entry;
+            }
+
+            $result[(string)$bookId] = $entries;
+        }
+
+        echo json_encode($result);
+    }
+
     // POST /api/books/{id}/races
     public function createRace($params)
     {

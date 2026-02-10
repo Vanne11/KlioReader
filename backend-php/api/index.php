@@ -62,7 +62,9 @@ $router->put('/user/stats', AuthMiddleware::wrap(array('UserController', 'update
 $router->delete('/user/delete', AuthMiddleware::wrap(array('UserController', 'delete')));
 
 // -- Libros (protegido) --
+$router->get('/books/digest', AuthMiddleware::wrap(array('BookController', 'digest')));
 $router->get('/books', AuthMiddleware::wrap(array('BookController', 'listBooks')));
+$router->post('/books/covers', AuthMiddleware::wrap(array('BookController', 'covers')));
 $router->post('/books/check-hash', AuthMiddleware::wrap(array('BookController', 'checkHash')));
 $router->post('/books/upload', AuthMiddleware::wrap(array('BookController', 'upload')));
 $router->post('/books/remove-duplicates', AuthMiddleware::wrap(array('BookController', 'removeDuplicates')));
@@ -93,6 +95,7 @@ $router->get('/shares/pending/count', AuthMiddleware::wrap(array('ShareControlle
 $router->post('/shares/{id}/accept', AuthMiddleware::wrap(array('ShareController', 'acceptShare')));
 $router->post('/shares/{id}/reject', AuthMiddleware::wrap(array('ShareController', 'rejectShare')));
 $router->get('/books/{id}/shared-progress', AuthMiddleware::wrap(array('ShareController', 'sharedProgress')));
+$router->get('/shared-progress/batch', AuthMiddleware::wrap(array('ShareController', 'batchSharedProgress')));
 
 // -- Carreras de lectura (protegido) --
 $router->post('/books/{id}/races', AuthMiddleware::wrap(array('ShareController', 'createRace')));
