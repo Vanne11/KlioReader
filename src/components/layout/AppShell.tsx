@@ -11,7 +11,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const setSidebarOpen = useUIStore(s => s.setSidebarOpen);
 
   return (
-    <div className="flex h-screen bg-[#0f0f14] text-white font-sans overflow-hidden" style={{ paddingTop: 'var(--sat)', paddingBottom: 'var(--sab)' }}>
+    <div className="flex h-full bg-[#0f0f14] text-white font-sans overflow-hidden" style={{ paddingTop: 'var(--sat)', paddingBottom: 'var(--sab)' }}>
       {isMobile ? (
         <>
           <Button

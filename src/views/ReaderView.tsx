@@ -94,7 +94,7 @@ export function ReaderView() {
   const usesFoliate = !isPdf && !isComic; // only epub uses foliate-js
 
   return (
-    <div ref={containerRef} className={`flex flex-col h-screen ${themeClasses[readerTheme]} transition-colors duration-300`} style={{ paddingTop: 'var(--sat)', paddingBottom: 'var(--sab)' }}>
+    <div ref={containerRef} className={`flex flex-col h-full ${themeClasses[readerTheme]} transition-colors duration-300`} style={{ paddingTop: 'var(--sat)', paddingBottom: 'var(--sab)' }}>
       <header className="flex items-center justify-between p-2 md:p-3 border-b border-white/10 backdrop-blur-md sticky top-0 z-50">
         <div className="flex items-center gap-1 md:gap-3">
           <Button variant="ghost" size="icon" onClick={() => setCurrentBook(null)}><X className="w-5 h-5" /></Button>
