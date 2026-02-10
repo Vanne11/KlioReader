@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useLibraryStore } from '@/stores/libraryStore';
+import { useCollections } from './useCollections';
 import type { Book, ScanResult } from '@/types';
 import { detectBookType } from '@/lib/constants';
 
@@ -46,12 +47,14 @@ export function useLibrary() {
     setLibraryPath, setBooks,
     editingLocalBook, editLocalForm, setEditingLocalBook, setEditLocalForm,
   } = useLibraryStore();
+  const { detectSagasFromScan } = useCollections();
 
   async function scanLibrary(path: string) {
     try {
       const results: ScanResult[] = await invoke("scan_directory", { dirPath: path });
       const scannedBooks = mapScanResults(results);
       setBooks(scannedBooks);
+      detectSagasFromScan(results);
     } catch (err) { console.error(err); }
   }
 

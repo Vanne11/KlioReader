@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useGamificationStore } from '@/stores/gamificationStore';
 import { useLibraryStore } from '@/stores/libraryStore';
 import { useUIStore } from '@/stores/uiStore';
-import { BADGES, getUnlockedBadges, statsToApi } from '@/lib/gamification';
+import { BADGES, CATEGORY_CONFIG, getUnlockedBadges, statsToApi } from '@/lib/gamification';
 import * as api from '@/lib/api';
 import * as syncQueue from '@/lib/syncQueue';
 import { getCloudSyncingRef } from './useCloudBooks';
@@ -12,7 +12,7 @@ export function useGamification() {
   const selectedTitleId = useGamificationStore(s => s.selectedTitleId);
   const socialStats = useGamificationStore(s => s.socialStats);
   const books = useLibraryStore(s => s.books);
-  const { showAlert } = useUIStore();
+  const showBadgeToast = useUIStore(s => s.showBadgeToast);
   const initialRenderRef = useRef(true);
 
   // Persist stats
@@ -46,7 +46,7 @@ export function useGamification() {
     const newBadges = currentUnlocked.filter(id => !previousIds.includes(id));
     if (newBadges.length > 0 && previousIds.length > 0 && !initialRenderRef.current) {
       const badge = BADGES.find(b => b.id === newBadges[0]);
-      if (badge) showAlert('success', '¡Nueva Insignia!', `🏆 ${badge.name} — ${badge.description}`);
+      if (badge) showBadgeToast(badge.name, CATEGORY_CONFIG[badge.category]?.emoji ?? '🏆');
     }
     const allKnown = [...new Set([...previousIds, ...currentUnlocked])];
     if (allKnown.length !== previousIds.length) {

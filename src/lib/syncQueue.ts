@@ -3,7 +3,9 @@ import * as api from "./api";
 import { invoke } from "@tauri-apps/api/core";
 
 const STORAGE_KEY = "klio_sync_queue";
+const HISTORY_KEY = "klio_sync_history";
 const MAX_RETRIES = 5;
+const MAX_HISTORY = 30;
 const PROCESS_INTERVAL = 5_000; // 5s
 
 export type SyncOpType = "upload_book" | "sync_progress" | "sync_stats" | "sync_title" | "sync_collections";
@@ -14,6 +16,15 @@ export interface SyncOp {
   payload: any;
   retries: number;
   createdAt: number;
+}
+
+export interface SyncOpDone {
+  id: string;
+  type: SyncOpType;
+  payload: any;
+  status: 'ok' | 'error';
+  message: string;
+  finishedAt: number;
 }
 
 // ── Callback para refrescar cloudBooks después de un upload ──
@@ -31,6 +42,96 @@ export function setOnQueueChange(cb: (count: number, summary: string, items: Syn
 // ── Callback para notificar qué item se está procesando ──
 let _onProcessingChange: ((id: string | null) => void) | null = null;
 export function setOnProcessingChange(cb: (id: string | null) => void) { _onProcessingChange = cb; }
+
+// ── Callback para notificar cambios en el historial ──
+let _onHistoryChange: ((items: SyncOpDone[]) => void) | null = null;
+export function setOnHistoryChange(cb: (items: SyncOpDone[]) => void) { _onHistoryChange = cb; }
+
+// ── Historial de operaciones completadas ──
+export function loadHistory(): SyncOpDone[] {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function saveHistory(history: SyncOpDone[]) {
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+  _onHistoryChange?.(history);
+}
+
+function pushHistory(op: SyncOp, status: 'ok' | 'error', message: string) {
+  const history = loadHistory();
+  history.unshift({
+    id: op.id,
+    type: op.type,
+    payload: op.payload,
+    status,
+    message,
+    finishedAt: Date.now(),
+  });
+  // Mantener máximo MAX_HISTORY items
+  if (history.length > MAX_HISTORY) history.length = MAX_HISTORY;
+  saveHistory(history);
+}
+
+export function clearHistory() {
+  saveHistory([]);
+}
+
+// ── Mensajes descriptivos para el historial ──
+function buildSuccessMessage(op: SyncOp, skipped?: boolean): string {
+  const p = op.payload;
+  switch (op.type) {
+    case 'upload_book': {
+      const title = p.title || p.bookPath?.split('/').pop() || '?';
+      if (skipped) return `"${title}" ya estaba en la nube`;
+      return `"${title}" subido correctamente`;
+    }
+    case 'sync_progress': {
+      const title = p.bookTitle || '?';
+      const pct = p.progress_percent != null ? Math.round(p.progress_percent) : null;
+      return pct != null ? `"${title}" — progreso actualizado a ${pct}%` : `"${title}" — progreso actualizado`;
+    }
+    case 'sync_stats': {
+      const level = p.level != null ? `Nivel ${p.level}` : null;
+      const xp = p.xp != null ? `${p.xp} XP` : null;
+      const parts = [level, xp].filter(Boolean).join(', ');
+      return parts ? `Estadísticas sincronizadas (${parts})` : 'Estadísticas sincronizadas';
+    }
+    case 'sync_title':
+      return 'Título actualizado';
+    case 'sync_collections': {
+      const count = p.collectionCount;
+      return count != null ? `${count} colecciones sincronizadas` : 'Colecciones sincronizadas';
+    }
+    default:
+      return 'Operación completada';
+  }
+}
+
+function buildErrorMessage(op: SyncOp, err: any): string {
+  const p = op.payload;
+  const errMsg = err?.message || String(err);
+  switch (op.type) {
+    case 'upload_book': {
+      const title = p.title || p.bookPath?.split('/').pop() || '?';
+      return `Error subiendo "${title}": ${errMsg}`;
+    }
+    case 'sync_progress': {
+      const title = p.bookTitle || '?';
+      return `Error sincronizando progreso de "${title}": ${errMsg}`;
+    }
+    case 'sync_stats':
+      return `Error sincronizando estadísticas: ${errMsg}`;
+    case 'sync_title':
+      return `Error actualizando título: ${errMsg}`;
+    case 'sync_collections':
+      return `Error sincronizando colecciones: ${errMsg}`;
+    default:
+      return `Error: ${errMsg}`;
+  }
+}
 
 // ── Persistencia ──
 function loadQueue(): SyncOp[] {
@@ -197,19 +298,21 @@ async function syncLocalCollectionsToCloud() {
 // ── Procesamiento ──
 let _processing = false;
 
-async function processOne(op: SyncOp): Promise<boolean> {
+/** Resultado de processOne: ok + si fue skipped (para mensajes diferenciados) */
+interface ProcessResult { ok: boolean; skipped?: boolean; }
+
+async function processOne(op: SyncOp): Promise<ProcessResult> {
   switch (op.type) {
     case "sync_progress": {
       const { cloudBookId, current_chapter, current_page, progress_percent } = op.payload;
       // Si tenemos cloudBookId directo, usarlo
       if (cloudBookId) {
         await api.syncProgress(cloudBookId, { current_chapter, current_page, progress_percent });
-        return true;
+        return { ok: true };
       }
       // Si no, buscar por título+autor en cloudBooks
-      // (no podemos acceder a cloudBooks desde aquí, así que buscamos por listBooks)
       const { bookTitle, bookAuthor } = op.payload;
-      if (!bookTitle) return true; // Descartar si no hay info
+      if (!bookTitle) return { ok: true }; // Descartar si no hay info
       const cloudBooks = await api.listBooks();
       const match = cloudBooks.find(cb =>
         cb.title.toLowerCase() === bookTitle.toLowerCase() &&
@@ -218,17 +321,17 @@ async function processOne(op: SyncOp): Promise<boolean> {
       if (match) {
         await api.syncProgress(match.id, { current_chapter, current_page, progress_percent });
       }
-      return true;
+      return { ok: true };
     }
 
     case "sync_stats": {
       await api.syncStats(op.payload);
-      return true;
+      return { ok: true };
     }
 
     case "sync_title": {
       await api.updateProfile({ selected_title_id: op.payload.selected_title_id });
-      return true;
+      return { ok: true };
     }
 
     case "upload_book": {
@@ -239,7 +342,7 @@ async function processOne(op: SyncOp): Promise<boolean> {
         const exists: boolean = await invoke("file_exists", { path: bookPath });
         if (!exists) {
           console.log(`[SyncQueue] Skip upload: archivo no existe en disco "${bookPath}"`);
-          return true;
+          return { ok: true, skipped: true };
         }
       } catch { /* si falla file_exists, continuar e intentar leer */ }
 
@@ -255,7 +358,7 @@ async function processOne(op: SyncOp): Promise<boolean> {
         });
         if (alreadyExists) {
           console.log(`[SyncQueue] Skip upload: "${title}" ya existe en la nube`);
-          return true;
+          return { ok: true, skipped: true };
         }
       } catch { /* si falla la verificación, continuar con el upload normal */ }
 
@@ -284,16 +387,16 @@ async function processOne(op: SyncOp): Promise<boolean> {
         description: description || undefined,
       });
       _onUploadComplete?.();
-      return true;
+      return { ok: true };
     }
 
     case "sync_collections": {
       await syncLocalCollectionsToCloud();
-      return true;
+      return { ok: true };
     }
 
     default:
-      return true; // Op desconocida, descartar
+      return { ok: true }; // Op desconocida, descartar
   }
 }
 
@@ -312,9 +415,10 @@ export async function processQueue() {
       console.log(`[SyncQueue] Procesando: ${op.type}`, op.payload.bookPath || op.payload.bookTitle || '');
       _onProcessingChange?.(op.id);
       try {
-        const ok = await processOne(op);
-        if (ok) {
+        const result = await processOne(op);
+        if (result.ok) {
           console.log(`[SyncQueue] ✓ ${op.type} completado`);
+          pushHistory(op, 'ok', buildSuccessMessage(op, result.skipped));
           queue = loadQueue();
           queue = queue.filter(q => q.id !== op.id);
           saveQueue(queue);
@@ -327,6 +431,7 @@ export async function processQueue() {
           queue[idx].retries++;
           if (queue[idx].retries >= MAX_RETRIES) {
             console.warn(`[SyncQueue] Descartando ${op.type} tras ${MAX_RETRIES} reintentos`);
+            pushHistory(op, 'error', buildErrorMessage(op, err));
             queue.splice(idx, 1);
           }
           saveQueue(queue);

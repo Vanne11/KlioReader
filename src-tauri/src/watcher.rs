@@ -49,7 +49,6 @@ impl LibraryWatcher {
         .map_err(|e| format!("Error creando watcher: {}", e))?;
 
         debouncer
-            .watcher()
             .watch(&path, RecursiveMode::Recursive)
             .map_err(|e| format!("Error vigilando directorio: {}", e))?;
 

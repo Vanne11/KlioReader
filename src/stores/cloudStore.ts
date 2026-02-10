@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { CloudBook } from '@/types';
-import type { SyncOp } from '@/lib/syncQueue';
+import type { SyncOp, SyncOpDone } from '@/lib/syncQueue';
 
 interface CloudState {
   cloudBooks: CloudBook[];
@@ -11,6 +11,7 @@ interface CloudState {
   queueSummary: string;
   queueItems: SyncOp[];
   queueProcessingId: string | null;
+  queueHistory: SyncOpDone[];
   editingCloudBook: CloudBook | null;
   editCloudForm: { title: string; author: string; description: string };
 
@@ -22,6 +23,7 @@ interface CloudState {
   setQueueSummary: (summary: string) => void;
   setQueueItems: (items: SyncOp[]) => void;
   setQueueProcessingId: (id: string | null) => void;
+  setQueueHistory: (items: SyncOpDone[]) => void;
   setEditingCloudBook: (book: CloudBook | null) => void;
   setEditCloudForm: (form: { title: string; author: string; description: string }) => void;
   updateEditCloudForm: (patch: Partial<{ title: string; author: string; description: string }>) => void;
@@ -36,6 +38,7 @@ export const useCloudStore = create<CloudState>()((set) => ({
   queueSummary: '',
   queueItems: [],
   queueProcessingId: null,
+  queueHistory: [],
   editingCloudBook: null,
   editCloudForm: { title: '', author: '', description: '' },
 
@@ -49,6 +52,7 @@ export const useCloudStore = create<CloudState>()((set) => ({
   setQueueSummary: (summary) => set({ queueSummary: summary }),
   setQueueItems: (items) => set({ queueItems: items }),
   setQueueProcessingId: (id) => set({ queueProcessingId: id }),
+  setQueueHistory: (items) => set({ queueHistory: items }),
   setEditingCloudBook: (book) => set({ editingCloudBook: book }),
   setEditCloudForm: (form) => set({ editCloudForm: form }),
   updateEditCloudForm: (patch) => set((s) => ({ editCloudForm: { ...s.editCloudForm, ...patch } })),

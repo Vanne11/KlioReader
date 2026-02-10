@@ -14,6 +14,7 @@ import { SettingsView } from '@/views/SettingsView';
 import { QueueView } from '@/views/QueueView';
 import { AppShell } from '@/components/layout/AppShell';
 import { AlertModal } from '@/components/shared/AlertModal';
+import { BadgeToast } from '@/components/shared/BadgeToast';
 import { LanguageModal } from '@/components/shared/LanguageModal';
 import "./App.css";
 
@@ -32,6 +33,7 @@ function App() {
       <TooltipProvider>
         <ReaderView />
         <AlertModal />
+        <BadgeToast />
         <LanguageModal />
       </TooltipProvider>
     );
@@ -42,6 +44,7 @@ function App() {
       <TooltipProvider>
         <BookDetailView />
         <AlertModal />
+        <BadgeToast />
         <LanguageModal />
       </TooltipProvider>
     );

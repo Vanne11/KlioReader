@@ -10,6 +10,7 @@ import { useShares } from './useShares';
 import { useChallenges } from './useChallenges';
 import { useAuth } from './useAuth';
 import { useSyncEvents } from './useStorageSync';
+import { useLibraryWatcher } from './useLibraryWatcher';
 import { buildInvokeConfig } from '@/lib/constants';
 import { mapScanResults } from './useLibrary';
 import { useCollections } from './useCollections';
@@ -47,6 +48,9 @@ export function usePersistence() {
   // Sync events listener
   useSyncEvents();
 
+  // File system watcher
+  useLibraryWatcher();
+
   // Persist reader preferences
   useEffect(() => { localStorage.setItem("libraryView", libraryView); }, [libraryView]);
   useEffect(() => { localStorage.setItem("readerFontSize", fontSize.toString()); }, [fontSize]);
@@ -57,10 +61,25 @@ export function usePersistence() {
   useEffect(() => { localStorage.setItem("klioLlmProvider", llmProvider); }, [llmProvider]);
   useEffect(() => { localStorage.setItem("klioLlmApiKey", llmApiKey); }, [llmApiKey]);
 
-  // Load books from localStorage on mount
+  // Load books from localStorage on mount + sync sagas immediately
   useEffect(() => {
     const savedRaw = localStorage.getItem("books_meta_v3");
-    if (savedRaw) setBooks(JSON.parse(savedRaw));
+    if (savedRaw) {
+      const savedBooks = JSON.parse(savedRaw);
+      setBooks(savedBooks);
+      // Detectar sagas inmediatamente desde los libros guardados
+      // para que no haya flash de libros sin agrupar
+      const booksWithSubfolder = savedBooks.filter((b: any) => b.subfolder);
+      if (booksWithSubfolder.length > 0) {
+        detectSagasFromScan(booksWithSubfolder.map((b: any) => ({
+          path: b.id || b.path,
+          subfolder: b.subfolder,
+          inferred_order: b.inferredOrder ?? null,
+          display_name: b.displayName ?? null,
+          metadata: { title: b.title || '', author: b.author || '' },
+        })));
+      }
+    }
     setBooksLoaded(true);
   }, []);
 

@@ -7,7 +7,7 @@ import * as syncQueue from '@/lib/syncQueue';
 
 export function useSyncQueue() {
   const authUser = useAuthStore(s => s.authUser);
-  const { setQueueCount, setQueueSummary, setQueueItems, setQueueProcessingId } = useCloudStore();
+  const { setQueueCount, setQueueSummary, setQueueItems, setQueueProcessingId, setQueueHistory } = useCloudStore();
   const { loadCloudBooks } = useCloudBooks();
 
   useEffect(() => {
@@ -23,6 +23,9 @@ export function useSyncQueue() {
       setQueueItems(items);
     });
     syncQueue.setOnProcessingChange((id) => setQueueProcessingId(id));
+    syncQueue.setOnHistoryChange((items) => setQueueHistory(items));
+    // Cargar historial existente al iniciar
+    setQueueHistory(syncQueue.loadHistory());
     syncQueue.startProcessing();
     return () => syncQueue.stopProcessing();
   }, [authUser]);
