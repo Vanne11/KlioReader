@@ -1182,7 +1182,8 @@ cmd_build_desktop() {
         bundle_arg=$(IFS=','; echo "${real_bundles[*]}")
         step "Ejecutando: ${DIM}npm run tauri build -- --bundles ${bundle_arg} ${extra_args}${NC}"
         echo ""
-        if ! npm run tauri build -- --bundles "$bundle_arg" $extra_args; then
+        # NO_STRIP=true evita que linuxdeploy use su strip viejo que no soporta .relr.dyn (Arch Linux)
+        if ! NO_STRIP=true npm run tauri build -- --bundles "$bundle_arg" $extra_args; then
             build_ok=false
         fi
     else
@@ -1190,7 +1191,7 @@ cmd_build_desktop() {
         step "Ejecutando: ${DIM}npm run tauri build -- --bundles deb ${extra_args}${NC}"
         info "${DIM}(se genera un .deb como subproducto, solo se recogerá el binario)${NC}"
         echo ""
-        if ! npm run tauri build -- --bundles deb $extra_args; then
+        if ! NO_STRIP=true npm run tauri build -- --bundles deb $extra_args; then
             build_ok=false
         fi
     fi

@@ -6,7 +6,7 @@ const STORAGE_KEY = "klio_sync_queue";
 const HISTORY_KEY = "klio_sync_history";
 const MAX_RETRIES = 5;
 const MAX_HISTORY = 30;
-const PROCESS_INTERVAL = 5_000; // 5s
+const PROCESS_INTERVAL = 30_000; // 30s (retry interval, enqueue() dispara procesamiento inmediato)
 
 export type SyncOpType = "upload_book" | "sync_progress" | "sync_stats" | "sync_title" | "sync_collections";
 
@@ -403,6 +403,12 @@ async function processOne(op: SyncOp): Promise<ProcessResult> {
 export async function processQueue() {
   if (_processing) return;
   if (!api.isLoggedIn()) return;
+
+  // Verificar rápido si hay items antes de tomar el lock
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw || raw === '[]') return;
+  } catch { return; }
 
   _processing = true;
   try {

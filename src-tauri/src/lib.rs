@@ -441,6 +441,24 @@ fn save_file_bytes(path: String, bytes: Vec<u8>) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn download_file_to_disk(url: String, path: String, token: String) -> Result<(), String> {
+    let client = reqwest::Client::new();
+    let mut request = client.get(&url);
+    if !token.is_empty() {
+        request = request.header("Authorization", format!("Bearer {}", token));
+    }
+    let response = request.send().await
+        .map_err(|e| format!("Error de conexión: {}", e))?;
+    if !response.status().is_success() {
+        return Err(format!("Error del servidor: {}", response.status()));
+    }
+    let bytes = response.bytes().await
+        .map_err(|e| format!("Error descargando datos: {}", e))?;
+    std::fs::write(&path, &bytes)
+        .map_err(|e| format!("Error guardando archivo: {}", e))
+}
+
+#[tauri::command]
 fn copy_file(src: String, dest: String) -> Result<(), String> {
     std::fs::copy(&src, &dest)
         .map(|_| ())
@@ -530,12 +548,16 @@ struct ComicPages {
 }
 
 #[tauri::command]
-fn extract_comic_pages(path: String, book_type: String) -> Result<ComicPages, String> {
+fn extract_comic_pages(app: tauri::AppHandle, path: String, book_type: String) -> Result<ComicPages, String> {
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis();
-    let temp_dir = std::env::temp_dir().join(format!("klio-comic-{}", timestamp));
+    // En Android std::env::temp_dir() devuelve /tmp que no es accesible (OS error 13).
+    // Usamos el cache dir de la app que siempre es escribible.
+    let base_tmp = app.path().app_cache_dir()
+        .unwrap_or_else(|_| std::env::temp_dir());
+    let temp_dir = base_tmp.join(format!("klio-comic-{}", timestamp));
     std::fs::create_dir_all(&temp_dir).map_err(|e| format!("Error creando directorio temporal: {}", e))?;
 
     let mut image_paths: Vec<String> = Vec::new();
@@ -641,6 +663,7 @@ pub fn run() {
             convert_cbr_to_cbz,
             read_file_bytes,
             save_file_bytes,
+            download_file_to_disk,
             copy_file,
             file_exists,
             create_subfolder,

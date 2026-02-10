@@ -38,6 +38,7 @@ if (in_array($origin, $allowedOrigins) || in_array('*', $allowedOrigins)) {
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization');
 header('Access-Control-Max-Age: 86400');
+header('Access-Control-Expose-Headers: Content-Disposition, Content-Length');
 header('Content-Type: application/json; charset=utf-8');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {

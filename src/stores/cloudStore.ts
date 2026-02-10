@@ -64,6 +64,16 @@ interface CloudState {
   clearCloudCache: () => void;
 }
 
+// Debounce para persistCache — evita serializar cloudBooks múltiples veces seguidas
+let _persistTimer: ReturnType<typeof setTimeout> | null = null;
+function debouncedSaveCache(hash: string, books: CloudBook[]) {
+  if (_persistTimer) clearTimeout(_persistTimer);
+  _persistTimer = setTimeout(() => {
+    saveCache(hash, books);
+    _persistTimer = null;
+  }, 500);
+}
+
 // Cargar caché al inicializar para tener datos inmediatos
 const cached = loadCache();
 
@@ -99,7 +109,7 @@ export const useCloudStore = create<CloudState>()((set, get) => ({
 
   persistCache: () => {
     const { cloudDigestHash, cloudBooks } = get();
-    if (cloudDigestHash) saveCache(cloudDigestHash, cloudBooks);
+    if (cloudDigestHash) debouncedSaveCache(cloudDigestHash, cloudBooks);
   },
   loadFromCache: () => {
     const c = loadCache();

@@ -82,7 +82,7 @@ export function useCloudBooks() {
         setCloudDigestHash(newDigest.hash);
       }
       // Persistir caché (sin portadas faltantes aún)
-      setTimeout(() => useCloudStore.getState().persistCache(), 0);
+      useCloudStore.getState().persistCache();
 
       cloudSyncingRef = true;
       processStatsAndBadges(cloudStats, socialStatsRaw);
@@ -116,7 +116,7 @@ export function useCloudBooks() {
         })
       );
       // Re-persistir caché con las portadas
-      setTimeout(() => useCloudStore.getState().persistCache(), 0);
+      useCloudStore.getState().persistCache();
     } catch {
       // No es crítico, las portadas son estéticas
     }
@@ -164,14 +164,13 @@ export function useCloudBooks() {
   }
 
   function autoEnqueueNewBooks(localBooks: Book[], cloudBooksList: api.CloudBook[]) {
+    // Pre-computar Set de claves cloud para búsqueda O(1)
+    const cloudKeys = new Set(
+      cloudBooksList.map(cb => normalizeForComparison(cb.title) + '|||' + normalizeForComparison(cb.author))
+    );
     for (const local of localBooks) {
-      const localTitle = normalizeForComparison(local.title);
-      const localAuthor = normalizeForComparison(local.author);
-      const alreadyInCloud = cloudBooksList.some(cb =>
-        normalizeForComparison(cb.title) === localTitle &&
-        normalizeForComparison(cb.author) === localAuthor
-      );
-      if (!alreadyInCloud) {
+      const key = normalizeForComparison(local.title) + '|||' + normalizeForComparison(local.author);
+      if (!cloudKeys.has(key)) {
         syncQueue.enqueue('upload_book', {
           bookPath: local.path,
           title: local.title,
@@ -212,10 +211,9 @@ export function useCloudBooks() {
         }
       }
       if (!copiedLocally) {
-        const blob = await api.downloadBook(cloudBook.id);
-        const arrayBuffer = await blob.arrayBuffer();
-        const bytes = Array.from(new Uint8Array(arrayBuffer));
-        await invoke("save_file_bytes", { path: savePath, bytes });
+        const downloadUrl = `${api.getApiUrl()}/api/books/${cloudBook.id}/download`;
+        const token = localStorage.getItem("authToken") || "";
+        await invoke("download_file_to_disk", { url: downloadUrl, path: savePath, token });
       }
       // Re-scan library directly (can't call hooks outside component)
       const results: ScanResult[] = await invoke("scan_directory", { dirPath: libraryPath });
@@ -240,7 +238,7 @@ export function useCloudBooks() {
       // Actualizar caché local directamente sin re-fetch
       setCloudBooks((prev: CloudBook[]) => prev.filter(b => b.id !== id));
       setCloudDigestHash(null); // Invalidar digest para que el próximo load recargue
-      setTimeout(() => useCloudStore.getState().persistCache(), 0);
+      useCloudStore.getState().persistCache();
       showAlert('success', 'Libro eliminado', 'El libro se eliminó de la nube. El progreso de lectura fue archivado.');
     } catch (err: any) {
       showAlert('error', 'Error al eliminar', err.message || 'No se pudo eliminar el libro');
@@ -264,7 +262,7 @@ export function useCloudBooks() {
       ));
       setEditingCloudBook(null);
       setCloudDigestHash(null); // Invalidar digest
-      setTimeout(() => useCloudStore.getState().persistCache(), 0);
+      useCloudStore.getState().persistCache();
     } catch (err: any) {
       showAlert('error', 'Error al editar', err.message || 'No se pudo actualizar el libro');
     }

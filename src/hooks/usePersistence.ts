@@ -83,11 +83,14 @@ export function usePersistence() {
     setBooksLoaded(true);
   }, []);
 
-  // Save books to localStorage
+  // Save books to localStorage (debounced para evitar serializar en cada micro-cambio)
   useEffect(() => {
     if (!booksLoaded) return;
-    const booksToSave = books.map(({ cover, ...rest }) => ({ ...rest }));
-    localStorage.setItem("books_meta_v3", JSON.stringify(booksToSave));
+    const timer = setTimeout(() => {
+      const booksToSave = books.map(({ cover, ...rest }) => ({ ...rest }));
+      localStorage.setItem("books_meta_v3", JSON.stringify(booksToSave));
+    }, 300);
+    return () => clearTimeout(timer);
   }, [books, booksLoaded]);
 
   // Fullscreen change listener

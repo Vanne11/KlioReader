@@ -206,12 +206,14 @@ export function LibraryView() {
     : null;
 
   // Libros a mostrar: si hay colección activa, solo sus libros; sino libros sin subfolder
-  const displayBooks = activeCollection
-    ? activeCollection.bookEntries
-        .sort((a, b) => a.orderIndex - b.orderIndex)
-        .map(entry => books.find(b => b.id === entry.bookId))
-        .filter((b): b is Book => !!b)
-    : books.filter(b => !b.subfolder);
+  const displayBooks = useMemo(() => {
+    if (!activeCollection) return books.filter(b => !b.subfolder);
+    const bookMap = new Map(books.map(b => [b.id, b]));
+    return activeCollection.bookEntries
+      .sort((a, b) => a.orderIndex - b.orderIndex)
+      .map(entry => bookMap.get(entry.bookId))
+      .filter((b): b is Book => !!b);
+  }, [activeCollection, books]);
 
   const hasCollections = localCollections.length > 0;
 
