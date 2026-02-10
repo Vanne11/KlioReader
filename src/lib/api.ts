@@ -67,8 +67,8 @@ async function request<T>(
   }
 
   // Handle binary responses (downloads)
-  const contentType = res.headers.get("Content-Type") || "";
-  if (contentType.includes("application/pdf") || contentType.includes("epub")) {
+  const contentDisposition = res.headers.get("Content-Disposition") || "";
+  if (contentDisposition.includes("attachment")) {
     return res.blob() as unknown as T;
   }
 

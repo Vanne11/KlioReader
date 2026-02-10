@@ -965,6 +965,11 @@ cmd_dev() {
             info "Lanzando en Android..."
             info "Asegúrate de tener un emulador corriendo o dispositivo conectado"
             echo ""
+            # Fix: unrar_sys usa lutimes() que no existe en Android bionic libc
+            export CXXFLAGS_aarch64_linux_android="-Dlutimes=utimes"
+            export CXXFLAGS_armv7_linux_androideabi="-Dlutimes=utimes"
+            export CXXFLAGS_i686_linux_android="-Dlutimes=utimes"
+            export CXXFLAGS_x86_64_linux_android="-Dlutimes=utimes"
             cd "$PROJECT_DIR"
             npm run tauri android dev
             ;;
@@ -1213,6 +1218,12 @@ cmd_build_android() {
     echo -e "  ${BOLD}${CYAN}🤖 Build Android${NC}"
     separator
     echo ""
+
+    # Fix: unrar_sys usa lutimes() que no existe en Android bionic libc
+    export CXXFLAGS_aarch64_linux_android="-Dlutimes=utimes"
+    export CXXFLAGS_armv7_linux_androideabi="-Dlutimes=utimes"
+    export CXXFLAGS_i686_linux_android="-Dlutimes=utimes"
+    export CXXFLAGS_x86_64_linux_android="-Dlutimes=utimes"
 
     # Verificar entorno
     if ! check_android_env; then
