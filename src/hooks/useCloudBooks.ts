@@ -42,8 +42,9 @@ export function useCloudBooks() {
       try {
         const digest = await api.getBooksDigest();
         if (digest.hash === cloudDigestHash && cloudBooks.length > 0) {
-          // No hay cambios — solo refrescar stats/badges en background
+          // No hay cambios — solo refrescar stats/badges y portadas faltantes en background
           refreshStatsOnly();
+          loadMissingCovers(cloudBooks);
           return;
         }
         // Hash cambió → necesitamos recargar
@@ -80,17 +81,44 @@ export function useCloudBooks() {
       if (newDigest) {
         setCloudDigestHash(newDigest.hash);
       }
-      // Persistir en localStorage después de actualizar el hash
+      // Persistir caché (sin portadas faltantes aún)
       setTimeout(() => useCloudStore.getState().persistCache(), 0);
 
       cloudSyncingRef = true;
       processStatsAndBadges(cloudStats, socialStatsRaw);
       setTimeout(() => { cloudSyncingRef = false; }, 0);
       autoEnqueueNewBooks(useLibraryStore.getState().books, cloudBooksList);
+
+      // Background: cargar portadas faltantes sin bloquear la UI
+      loadMissingCovers(cloudBooksList);
     } catch (err: any) {
       showAlert('error', 'Error al cargar libros', err.message || 'No se pudieron cargar los libros de la nube');
     } finally {
       setCloudLoading(false);
+    }
+  }
+
+  // Cargar portadas en background para libros que no tienen
+  async function loadMissingCovers(books: api.CloudBook[]) {
+    const missingIds = books.filter(b => !b.cover_base64).map(b => b.id);
+    if (missingIds.length === 0) return;
+
+    try {
+      const covers = await api.getBookCovers(missingIds);
+      const coverEntries = Object.entries(covers);
+      if (coverEntries.length === 0) return;
+
+      // Merge portadas en la lista actual del store
+      useCloudStore.getState().setCloudBooks((prev: api.CloudBook[]) =>
+        prev.map(b => {
+          const cover = covers[String(b.id)];
+          return cover ? { ...b, cover_base64: cover } : b;
+        })
+      );
+      // Re-persistir caché con las portadas
+      setTimeout(() => useCloudStore.getState().persistCache(), 0);
+    } catch {
+      // No es crítico, las portadas son estéticas
     }
   }
 

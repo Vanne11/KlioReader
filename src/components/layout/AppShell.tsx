@@ -35,7 +35,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       ) : (
         <Sidebar />
       )}
-      <main className="flex-1 flex flex-col overflow-hidden bg-[#16161e]/30">
+      <main className={`flex-1 flex flex-col overflow-hidden bg-[#16161e]/30 ${isMobile ? 'pt-14' : ''}`}>
         {children}
       </main>
     </div>

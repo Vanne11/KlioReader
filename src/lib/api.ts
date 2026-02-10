@@ -304,6 +304,13 @@ export async function getBatchSharedProgress(): Promise<Record<string, SharedUse
   return request<Record<string, SharedUserProgress[]>>("/api/shared-progress/batch");
 }
 
+export async function getBookCovers(ids: number[]): Promise<Record<string, string>> {
+  return request<Record<string, string>>("/api/books/covers", {
+    method: "POST",
+    body: JSON.stringify({ ids }),
+  });
+}
+
 export async function getBook(id: number): Promise<CloudBook> {
   return request<CloudBook>(`/api/books/${id}`);
 }

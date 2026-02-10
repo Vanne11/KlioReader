@@ -358,6 +358,13 @@ const es = {
     clearHistoryConfirm: '¿Limpiar el historial de operaciones completadas?',
     ago: 'hace {time}',
   },
+  onboarding: {
+    libraryFolder: 'Carpeta de Biblioteca',
+    libraryFolderDesc: 'Elige dónde están tus libros (EPUB, PDF, CBZ)',
+    defaultFolder: 'Carpeta por defecto',
+    useDefault: 'Usar esta carpeta',
+    chooseAnother: 'Elegir otra carpeta',
+  },
   plurals: {
     book: ['libro', 'libros'],
     day: ['día', 'días'],

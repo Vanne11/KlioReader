@@ -360,6 +360,13 @@ const en: TranslationDict = {
     clearHistoryConfirm: 'Clear the completed operations history?',
     ago: '{time} ago',
   },
+  onboarding: {
+    libraryFolder: 'Library Folder',
+    libraryFolderDesc: 'Choose where your books are (EPUB, PDF, CBZ)',
+    defaultFolder: 'Default folder',
+    useDefault: 'Use this folder',
+    chooseAnother: 'Choose another folder',
+  },
   plurals: {
     book: ['book', 'books'],
     day: ['day', 'days'],
