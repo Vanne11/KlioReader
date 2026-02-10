@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   BookOpen, Flame, LayoutGrid, Grid2X2, List, Square, Pencil,
   Loader2, FolderOpen, Settings2, Layers, Plus, ArrowLeft, Trash2,
-  Users, User, ChevronDown, ChevronUp, Play,
+  Users, User, ChevronDown, ChevronUp, Play, Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -24,6 +24,8 @@ import { useCollectionsStore } from '@/stores/collectionsStore';
 import { useLibrary } from '@/hooks/useLibrary';
 import { useReader } from '@/hooks/useReader';
 import { useCollections } from '@/hooks/useCollections';
+import { useBookFilters, type FilterConfig } from '@/hooks/useBookFilters';
+import { SearchFilterBar } from '@/components/shared/SearchFilterBar';
 import { coverSrc, getCollectionCoverSrc } from '@/lib/utils';
 import { useT } from '@/i18n';
 import { CreateCollectionDialog } from '@/components/shared/CreateCollectionDialog';
@@ -213,6 +215,67 @@ export function LibraryView() {
 
   const hasCollections = localCollections.length > 0;
 
+  // Para búsqueda: si hay colección activa busca dentro de ella, sino en TODOS los libros
+  const filterSource = activeCollection ? displayBooks : books;
+
+  const filterConfig = useMemo<FilterConfig<Book>>(() => ({
+    searchFields: (book) => [book.title, book.author],
+    filters: [
+      {
+        key: 'format',
+        label: t('filters.format'),
+        options: [
+          { value: 'epub', label: 'EPUB' },
+          { value: 'pdf', label: 'PDF' },
+          { value: 'cbz', label: 'CBZ' },
+          { value: 'cbr', label: 'CBR' },
+        ],
+        multi: true,
+      },
+      {
+        key: 'status',
+        label: t('filters.status'),
+        options: [
+          { value: 'not_started', label: t('filters.notStarted') },
+          { value: 'in_progress', label: t('filters.inProgress') },
+          { value: 'finished', label: t('filters.finished') },
+        ],
+      },
+    ],
+    sortOptions: [
+      { key: 'title_az', label: t('filters.titleAZ'), fn: (a: Book, b: Book) => a.title.localeCompare(b.title) },
+      { key: 'title_za', label: t('filters.titleZA'), fn: (a: Book, b: Book) => b.title.localeCompare(a.title) },
+      { key: 'last_read', label: t('filters.lastRead'), fn: (a: Book, b: Book) => (b.lastRead || '').localeCompare(a.lastRead || '') },
+      { key: 'progress_asc', label: t('filters.progressAsc'), fn: (a: Book, b: Book) => a.progress - b.progress },
+      { key: 'progress_desc', label: t('filters.progressDesc'), fn: (a: Book, b: Book) => b.progress - a.progress },
+    ],
+    filterFn: (book, activeFilters) => {
+      if (activeFilters.format?.length) {
+        if (!activeFilters.format.includes(book.type)) return false;
+      }
+      if (activeFilters.status?.length) {
+        const s = activeFilters.status[0];
+        if (s === 'not_started' && book.progress > 0) return false;
+        if (s === 'in_progress' && (book.progress === 0 || book.progress >= 100)) return false;
+        if (s === 'finished' && book.progress < 100) return false;
+      }
+      return true;
+    },
+  }), [t]);
+
+  const {
+    filteredItems: filteredBooks,
+    searchQuery, setSearchQuery,
+    activeFilters, setFilter,
+    activeSort, setActiveSort,
+    clearFilters, hasActiveFilters,
+    filtersOpen, setFiltersOpen,
+    totalCount,
+  } = useBookFilters(filterSource, filterConfig);
+
+  // Sin filtros: vista normal (colecciones + libros sueltos). Con filtros: resultados de toda la biblioteca.
+  const booksToRender = hasActiveFilters ? filteredBooks : displayBooks;
+
   return (
     <>
       <header className="h-14 md:h-16 border-b border-white/5 flex items-center justify-between px-4 md:px-8 bg-[#16161e]/50 backdrop-blur-md">
@@ -306,8 +369,28 @@ export function LibraryView() {
               </div>
             )}
 
-            {/* Progreso Compartido (solo cuando no hay colección activa y hay datos) */}
-            {!activeCollection && authUser && (() => {
+            {/* Search & Filters */}
+            {filterSource.length > 0 && (
+              <SearchFilterBar
+                searchQuery={searchQuery}
+                onSearchChange={setSearchQuery}
+                filters={filterConfig.filters}
+                activeFilters={activeFilters}
+                onFilterChange={setFilter}
+                sortOptions={filterConfig.sortOptions}
+                activeSort={activeSort}
+                onSortChange={setActiveSort}
+                onClear={clearFilters}
+                hasActive={hasActiveFilters}
+                filtersOpen={filtersOpen}
+                onToggleFilters={() => setFiltersOpen(v => !v)}
+                filteredCount={filteredBooks.length}
+                totalCount={totalCount}
+              />
+            )}
+
+            {/* Progreso Compartido (solo cuando no hay colección activa y sin filtros activos) */}
+            {!activeCollection && !hasActiveFilters && authUser && (() => {
               const sharedCloudBooks = cloudBooks.filter(b => b.share_count > 0 && sharedProgressMap[b.id]?.length > 0);
               if (sharedCloudBooks.length === 0) return null;
               return (
@@ -382,8 +465,8 @@ export function LibraryView() {
               );
             })()}
 
-            {/* Colecciones (solo cuando no hay colección activa) */}
-            {!activeCollection && hasCollections && (
+            {/* Colecciones (solo cuando no hay colección activa y sin filtros activos) */}
+            {!activeCollection && !hasActiveFilters && hasCollections && (
               <div className="space-y-3">
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                   {localCollections.map(col => (
@@ -401,14 +484,14 @@ export function LibraryView() {
             )}
 
             {/* Grid de libros */}
-            {displayBooks.length > 0 && (
+            {booksToRender.length > 0 && (
               <div className={`
                 ${libraryView === 'grid-large' ? 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8 md:gap-16' : ''}
                 ${libraryView === 'grid-mini' ? 'flex flex-wrap gap-3 md:gap-4' : ''}
                 ${libraryView === 'grid-card' ? 'grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-3 md:gap-4' : ''}
                 ${libraryView === 'list-info' ? 'space-y-4 max-w-4xl mx-auto' : ''}
               `}>
-                {displayBooks.map((book) => (
+                {booksToRender.map((book) => (
                   <BookCard
                     key={book.id}
                     book={book}
@@ -418,6 +501,15 @@ export function LibraryView() {
                     t={t}
                   />
                 ))}
+              </div>
+            )}
+
+            {/* Sin resultados con filtros */}
+            {filterSource.length > 0 && filteredBooks.length === 0 && hasActiveFilters && (
+              <div className="text-center py-16 opacity-40">
+                <Search className="w-12 h-12 mx-auto mb-3" />
+                <p className="text-sm font-bold">{t('filters.noResults')}</p>
+                <p className="text-xs mt-1">{t('filters.noResultsDesc')}</p>
               </div>
             )}
 

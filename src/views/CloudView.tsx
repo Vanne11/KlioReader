@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   BookOpen, Cloud, CloudUpload, CloudDownload, LogIn, Loader2, Server, Trash2, Pencil,
   User, AlertTriangle, Check, X, Share2, Bell, Send, Search, Users, ChevronDown, ChevronUp,
@@ -25,6 +25,8 @@ import { useCollections } from '@/hooks/useCollections';
 import { useCollectionsStore } from '@/stores/collectionsStore';
 import { RaceLeaderboard } from '@/components/social/RaceLeaderboard';
 import { ChallengeCard } from '@/components/social/ChallengeCard';
+import { useBookFilters, type FilterConfig } from '@/hooks/useBookFilters';
+import { SearchFilterBar } from '@/components/shared/SearchFilterBar';
 import { coverSrc, formatBytes } from '@/lib/utils';
 import { useT } from '@/i18n';
 import * as api from '@/lib/api';
@@ -67,6 +69,72 @@ export function CloudView() {
   const [collectionShareSearch, setCollectionShareSearch] = useState('');
   const [showDedupConfirm, setShowDedupConfirm] = useState(false);
   const hasDuplicates = cloudBooks.some(cb => cb.is_duplicate);
+
+  const cloudFilterConfig = useMemo<FilterConfig<api.CloudBook>>(() => ({
+    searchFields: (book) => [book.title, book.author],
+    filters: [
+      {
+        key: 'format',
+        label: t('filters.format'),
+        options: [
+          { value: 'epub', label: 'EPUB' },
+          { value: 'pdf', label: 'PDF' },
+        ],
+        multi: true,
+      },
+      {
+        key: 'shared',
+        label: t('filters.shared'),
+        options: [
+          { value: 'shared', label: t('filters.sharedOnly') },
+          { value: 'personal', label: t('filters.personalOnly') },
+        ],
+      },
+      {
+        key: 'status',
+        label: t('filters.status'),
+        options: [
+          { value: 'not_started', label: t('filters.notStarted') },
+          { value: 'in_progress', label: t('filters.inProgress') },
+          { value: 'finished', label: t('filters.finished') },
+        ],
+      },
+    ],
+    sortOptions: [
+      { key: 'title_az', label: t('filters.titleAZ'), fn: (a: api.CloudBook, b: api.CloudBook) => a.title.localeCompare(b.title) },
+      { key: 'title_za', label: t('filters.titleZA'), fn: (a: api.CloudBook, b: api.CloudBook) => b.title.localeCompare(a.title) },
+      { key: 'upload_date', label: t('filters.uploadDate'), fn: (a: api.CloudBook, b: api.CloudBook) => (b.created_at || '').localeCompare(a.created_at || '') },
+      { key: 'progress_asc', label: t('filters.progressAsc'), fn: (a: api.CloudBook, b: api.CloudBook) => a.progress_percent - b.progress_percent },
+      { key: 'progress_desc', label: t('filters.progressDesc'), fn: (a: api.CloudBook, b: api.CloudBook) => b.progress_percent - a.progress_percent },
+    ],
+    filterFn: (book, activeFilters) => {
+      if (activeFilters.format?.length) {
+        if (!activeFilters.format.includes(book.file_type)) return false;
+      }
+      if (activeFilters.shared?.length) {
+        const s = activeFilters.shared[0];
+        if (s === 'shared' && book.share_count === 0) return false;
+        if (s === 'personal' && book.share_count > 0) return false;
+      }
+      if (activeFilters.status?.length) {
+        const s = activeFilters.status[0];
+        if (s === 'not_started' && book.progress_percent > 0) return false;
+        if (s === 'in_progress' && (book.progress_percent === 0 || book.progress_percent >= 100)) return false;
+        if (s === 'finished' && book.progress_percent < 100) return false;
+      }
+      return true;
+    },
+  }), [t]);
+
+  const {
+    filteredItems: filteredCloudBooks,
+    searchQuery: cloudSearchQuery, setSearchQuery: setCloudSearchQuery,
+    activeFilters: cloudActiveFilters, setFilter: setCloudFilter,
+    activeSort: cloudActiveSort, setActiveSort: setCloudActiveSort,
+    clearFilters: clearCloudFilters, hasActiveFilters: hasCloudActiveFilters,
+    filtersOpen: cloudFiltersOpen, setFiltersOpen: setCloudFiltersOpen,
+    totalCount: cloudTotalCount,
+  } = useBookFilters(cloudBooks, cloudFilterConfig);
 
   function renderCloudBook(cb: typeof cloudBooks[number], variant: 'shared' | 'personal') {
     return (
@@ -260,18 +328,44 @@ export function CloudView() {
               </div>
             </div>
 
+            {/* Search & Filters */}
+            {cloudBooks.length > 0 && (
+              <SearchFilterBar
+                searchQuery={cloudSearchQuery}
+                onSearchChange={setCloudSearchQuery}
+                filters={cloudFilterConfig.filters}
+                activeFilters={cloudActiveFilters}
+                onFilterChange={setCloudFilter}
+                sortOptions={cloudFilterConfig.sortOptions}
+                activeSort={cloudActiveSort}
+                onSortChange={setCloudActiveSort}
+                onClear={clearCloudFilters}
+                hasActive={hasCloudActiveFilters}
+                filtersOpen={cloudFiltersOpen}
+                onToggleFilters={() => setCloudFiltersOpen(v => !v)}
+                filteredCount={filteredCloudBooks.length}
+                totalCount={cloudTotalCount}
+              />
+            )}
+
             {cloudBooks.length === 0 ? (
               <div className="text-center py-16 opacity-40">
                 <CloudUpload className="w-16 h-16 mx-auto mb-4" />
                 <p className="text-sm">{t('cloud.noCloudBooks')}</p>
                 <p className="text-xs mt-1">{t('cloud.noCloudBooksDesc')}</p>
               </div>
+            ) : filteredCloudBooks.length === 0 && hasCloudActiveFilters ? (
+              <div className="text-center py-16 opacity-40">
+                <Search className="w-12 h-12 mx-auto mb-3" />
+                <p className="text-sm font-bold">{t('filters.noResults')}</p>
+                <p className="text-xs mt-1">{t('filters.noResultsDesc')}</p>
+              </div>
             ) : (
               <>
                 {/* Libros compartidos */}
                 {(() => {
-                  const sharedBooks = cloudBooks.filter(b => b.share_count > 0);
-                  const personalBooks = cloudBooks.filter(b => b.share_count === 0);
+                  const sharedBooks = filteredCloudBooks.filter(b => b.share_count > 0);
+                  const personalBooks = filteredCloudBooks.filter(b => b.share_count === 0);
                   return (
                     <>
                       {sharedBooks.length > 0 && (
