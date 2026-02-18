@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import type { Book, ReaderTheme, ReaderFont, ReadView } from '@/types';
 import { isComicType } from '@/lib/constants';
+import { parseEpub, EpubRenderer } from '@/lib/epub';
 
 interface FoliateReaderProps {
   bookPath: string;
@@ -25,7 +26,6 @@ const THEME_COLORS: Record<ReaderTheme, { bg: string; fg: string }> = {
 function buildCSS(theme: ReaderTheme, fontSize: number, fontFamily: ReaderFont, isComic: boolean): string {
   const { bg, fg } = THEME_COLORS[theme];
   if (isComic) {
-    // Comics: solo fondo, sin override de fuente/tamaño (son imágenes)
     return `html, body { background: ${bg} !important; }`;
   }
   return `
@@ -46,11 +46,12 @@ export function FoliateReader({
   initialSection, onRelocate, onReady,
 }: FoliateReaderProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const viewRef = useRef<any>(null);
+  const rendererRef = useRef<EpubRenderer | null>(null);
   const onRelocateRef = useRef(onRelocate);
   const onReadyRef = useRef(onReady);
   const initialSectionRef = useRef(initialSection);
   const isComic = isComicType(bookType);
+  const [error, setError] = useState<string | null>(null);
 
   onRelocateRef.current = onRelocate;
   onReadyRef.current = onReady;
@@ -58,117 +59,115 @@ export function FoliateReader({
   // Open/close the book
   useEffect(() => {
     const container = containerRef.current!;
-    if (!containerRef.current) return;
+    if (!container) return;
 
     let cancelled = false;
-    let view: any = null;
+    let renderer: EpubRenderer | null = null;
 
     async function init() {
-      const { View } = await import('foliate-js/view.js');
-
+      // Leer archivo como base64 y decodificar a bytes
+      const b64: string = await invoke('read_file_base64', { path: bookPath });
       if (cancelled) return;
 
-      view = new View();
-      view.style.cssText = 'width: 100%; height: 100%; display: block;';
-      container.appendChild(view);
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
 
-      view.addEventListener('relocate', (e: CustomEvent) => {
-        const detail = e.detail;
-        onRelocateRef.current?.({
-          fraction: detail?.fraction ?? 0,
-          sectionIndex: detail?.section?.current ?? 0,
-          sectionTotal: detail?.section?.total ?? 1,
-          cfi: detail?.cfi,
-        });
+      // Parsear EPUB
+      const book = await parseEpub(bytes.buffer);
+      if (cancelled) return;
+
+      // Crear renderer
+      renderer = new EpubRenderer(container, book, {
+        onRelocate: (detail) => {
+          onRelocateRef.current?.({
+            fraction: detail.fraction,
+            sectionIndex: detail.section.current,
+            sectionTotal: detail.section.total,
+          });
+        },
+        onLoad: (detail) => {
+          registerIframeEvents(detail.doc, renderer!);
+        },
       });
 
-      // Load file bytes — CBR needs conversion to CBZ first
-      let fileBytes: number[];
-      let fileName: string;
+      if (cancelled) { renderer.destroy(); return; }
 
-      if (bookType === 'cbr') {
-        fileBytes = await invoke('convert_cbr_to_cbz', { path: bookPath });
-        // Use .cbz extension so foliate-js detects it correctly
-        fileName = (bookPath.split('/').pop() || 'comic').replace(/\.cbr$/i, '.cbz');
-      } else {
-        fileBytes = await invoke('read_file_bytes', { path: bookPath });
-        fileName = bookPath.split('/').pop() || 'book.epub';
-      }
+      rendererRef.current = renderer;
 
-      if (cancelled) { view.remove(); return; }
+      // Configurar flow y columnas
+      renderer.setFlow(flow === 'paginated' ? 'paginated' : 'scrolled');
+      renderer.setMaxColumnCount(pageColumns);
+      renderer.setStyles(buildCSS(theme, fontSize, fontFamily, isComic));
 
-      const blob = new File([new Uint8Array(fileBytes)], fileName);
-
-      await view.open(blob);
-      if (cancelled) { view.close(); view.remove(); return; }
-
-      viewRef.current = view;
-
-      // Comics are fixed-layout (pre-paginated) — foliate-js handles this automatically
-      // For EPUBs, set renderer attributes
-      if (!view.isFixedLayout) {
-        view.renderer.setAttribute('flow', flow === 'paginated' ? 'paginated' : 'scrolled');
-        view.renderer.setAttribute('max-column-count', String(pageColumns));
-      }
-
-      // Apply initial styles (fixed-layout renderers like comics may not support setStyles)
-      if (typeof view.renderer.setStyles === 'function') {
-        view.renderer.setStyles(buildCSS(theme, fontSize, fontFamily, isComic));
-      }
-
-      // Navigate to saved position
+      // Navegar a la posición guardada
       const section = initialSectionRef.current ?? 0;
       if (section > 0) {
-        await view.goTo(section);
+        await renderer.goTo(section);
       } else {
-        await view.init({ showTextStart: true });
+        await renderer.init();
       }
 
-      // Register touch/keyboard handlers in iframe on load
-      const handleLoad = (e: CustomEvent) => {
-        const doc = e.detail?.doc as Document;
-        if (!doc) return;
-        registerIframeEvents(doc, view);
+      // Crear wrapper compatible con la interfaz que espera ReaderView
+      const viewCompat = {
+        renderer: {
+          setStyles: (css: string) => renderer?.setStyles(css),
+          setAttribute: (name: string, value: string) => {
+            if (name === 'flow') renderer?.setFlow(value as any);
+            if (name === 'max-column-count') renderer?.setMaxColumnCount(Number(value));
+          },
+          getContents: () => renderer?.getContents() || [],
+        },
+        isFixedLayout: book.isFixedLayout,
+        next: () => renderer?.next(),
+        prev: () => renderer?.prev(),
+        goTo: (target: number) => renderer?.goTo(target),
+        goToFraction: (frac: number) => renderer?.goToFraction(frac),
+        close: () => renderer?.destroy(),
       };
-      view.addEventListener('load', handleLoad);
 
-      // Also register on already-loaded content
-      const contents = view.renderer.getContents?.();
-      if (contents) {
-        for (const { doc } of contents) {
-          if (doc) registerIframeEvents(doc, view);
-        }
-      }
-
-      onReadyRef.current?.(view);
+      onReadyRef.current?.(viewCompat);
     }
 
-    init().catch(console.error);
+    init().catch(err => {
+      console.error('[EpubReader]', err);
+      setError(String(err?.message || err));
+    });
 
     return () => {
       cancelled = true;
-      if (view) {
-        try { view.close(); } catch {}
-        try { view.remove(); } catch {}
+      if (renderer) {
+        try { renderer.destroy(); } catch {}
       }
-      viewRef.current = null;
+      rendererRef.current = null;
     };
   }, [bookPath]);
 
   // Update styles when theme/font/fontSize change
   useEffect(() => {
-    const view = viewRef.current;
-    if (!view?.renderer || typeof view.renderer.setStyles !== 'function') return;
-    view.renderer.setStyles(buildCSS(theme, fontSize, fontFamily, isComic));
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    renderer.setStyles(buildCSS(theme, fontSize, fontFamily, isComic));
   }, [theme, fontSize, fontFamily]);
 
-  // Update flow/columns (only for non-fixed-layout books)
+  // Update flow/columns
   useEffect(() => {
-    const view = viewRef.current;
-    if (!view?.renderer || view.isFixedLayout) return;
-    view.renderer.setAttribute('flow', flow === 'paginated' ? 'paginated' : 'scrolled');
-    view.renderer.setAttribute('max-column-count', String(pageColumns));
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    renderer.setFlow(flow === 'paginated' ? 'paginated' : 'scrolled');
+    renderer.setMaxColumnCount(pageColumns);
   }, [flow, pageColumns]);
+
+  if (error) {
+    return (
+      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
+        <div style={{ textAlign: 'center', opacity: 0.6, maxWidth: '400px' }}>
+          <p style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '8px' }}>Error al abrir el libro</p>
+          <p style={{ fontSize: '11px', wordBreak: 'break-all' }}>{error}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -178,7 +177,7 @@ export function FoliateReader({
   );
 }
 
-function registerIframeEvents(doc: Document, view: any) {
+function registerIframeEvents(doc: Document, renderer: EpubRenderer) {
   let startX = 0;
   let startY = 0;
   let startTime = 0;
@@ -206,21 +205,21 @@ function registerIframeEvents(doc: Document, view: any) {
     if (target.closest?.('a, button, [role="button"]')) return;
 
     if (absDx > SWIPE_THRESHOLD && absDx > absDy * 1.5) {
-      if (dx < 0) view.next();
-      else view.prev();
+      if (dx < 0) renderer.next();
+      else renderer.prev();
       return;
     }
 
     if (elapsed < TAP_MAX_DURATION && absDx < TAP_THRESHOLD && absDy < TAP_THRESHOLD) {
       const vw = doc.documentElement.clientWidth;
       const relX = touch.clientX / vw;
-      if (relX < 0.25) view.prev();
-      else if (relX > 0.75) view.next();
+      if (relX < 0.25) renderer.prev();
+      else if (relX > 0.75) renderer.next();
     }
   }, { passive: true });
 
   doc.addEventListener('keydown', (e: KeyboardEvent) => {
-    if (e.key === 'ArrowRight') view.next();
-    if (e.key === 'ArrowLeft') view.prev();
+    if (e.key === 'ArrowRight') renderer.next();
+    if (e.key === 'ArrowLeft') renderer.prev();
   });
 }
