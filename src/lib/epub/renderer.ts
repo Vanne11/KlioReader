@@ -141,6 +141,67 @@ export class EpubRenderer {
     }
   }
 
+  /** Generar un CFI para la posición actual visible */
+  getCFI(): string {
+    // Formato: epubcfi(/6/{spineStep}[{spineId}]!/{bodyPath},{startOffset})
+    // Simplificado pero compatible: /6/{spinePos}!/{bodyPath}/~{page}
+    const spinePos = (this.currentIndex + 1) * 2; // EPUB CFI usa pasos pares
+    const spineId = this.book.spine[this.currentIndex]?.id || '';
+    const doc = this.iframe.contentDocument;
+
+    let bodyPath = '/4'; // <body> es normalmente el 4to hijo de <html>
+    let charOffset = '';
+
+    if (doc?.body) {
+      // Encontrar el primer nodo de texto visible en la página actual
+      const node = this.findFirstVisibleTextNode(doc);
+      if (node) {
+        bodyPath = this.buildNodePath(node, doc.body);
+        charOffset = ':0';
+      }
+    }
+
+    const idPart = spineId ? `[${spineId}]` : '';
+    return `epubcfi(/6/${spinePos}${idPart}!${bodyPath}${charOffset})`;
+  }
+
+  /** Navegar a una posición CFI */
+  async goToCFI(cfi: string): Promise<void> {
+    const parsed = this.parseCFI(cfi);
+    if (!parsed) return;
+
+    // Navegar a la sección del spine
+    await this.goTo(parsed.spineIndex);
+
+    // Si hay un path dentro del documento, intentar scrollear al elemento
+    if (parsed.elementId) {
+      const doc = this.iframe.contentDocument;
+      if (doc) {
+        const el = doc.getElementById(parsed.elementId);
+        if (el) {
+          if (this.flow === 'paginated') {
+            // Calcular en qué página está el elemento
+            const rect = el.getBoundingClientRect();
+            const containerWidth = this.iframe.clientWidth;
+            if (containerWidth > 0) {
+              const scrollLeft = doc.documentElement.scrollLeft || doc.body.scrollLeft;
+              this.currentPage = Math.floor((scrollLeft + rect.left) / containerWidth);
+              this.scrollToCurrentPage();
+              this.emitRelocate();
+            }
+          } else {
+            el.scrollIntoView({ behavior: 'instant' });
+          }
+        }
+      }
+    } else if (parsed.pageEstimate >= 0 && this.flow === 'paginated') {
+      // Estimar página a partir del bodyPath
+      this.currentPage = Math.min(parsed.pageEstimate, this.totalPages - 1);
+      this.scrollToCurrentPage();
+      this.emitRelocate();
+    }
+  }
+
   /** Destruir el renderer y liberar recursos */
   destroy(): void {
     this.iframe.remove();
@@ -252,25 +313,26 @@ ${this.extractBody(item.content)}
   }
 
   private extractBody(html: string): string {
+    // Siempre extraer los estilos del <head> (CSS propio del EPUB)
+    const headStyles = this.extractHeadStyles(html);
+
     // Extraer el contenido entre <body> y </body>
     const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-    if (bodyMatch) return bodyMatch[1];
+    if (bodyMatch) return headStyles + bodyMatch[1];
 
-    // Si no tiene body tags, buscar contenido después de </head> o el HTML completo
+    // Si no tiene body tags, buscar contenido después de </head>
     const headEnd = html.indexOf('</head>');
     if (headEnd !== -1) {
       const afterHead = html.substring(headEnd + 7);
-      // Quitar tags html/body envolventes si existen
-      return afterHead.replace(/<\/?(?:html|body)[^>]*>/gi, '');
+      return headStyles + afterHead.replace(/<\/?(?:html|body)[^>]*>/gi, '');
     }
 
-    // Extraer CSS de <style> y <link> del head y agregarlo al body
-    const styles = this.extractHeadStyles(html);
+    // Último fallback: limpiar todo el HTML
     const bodyContent = html.replace(/<\/?(?:html|head|body|!DOCTYPE)[^>]*>/gi, '')
       .replace(/<meta[^>]*>/gi, '')
       .replace(/<title[^>]*>[\s\S]*?<\/title>/gi, '');
 
-    return styles + bodyContent;
+    return headStyles + bodyContent;
   }
 
   private extractHeadStyles(html: string): string {
@@ -372,12 +434,21 @@ ${this.extractBody(item.content)}
     const sectionRange = spineItem.endFraction - spineItem.startFraction;
     const fraction = spineItem.startFraction + (pageFraction * sectionRange);
 
+    // Generar CFI para la posición actual
+    let cfi: string | undefined;
+    try {
+      cfi = this.getCFI();
+    } catch {
+      // Si falla generar CFI, no bloquear la navegación
+    }
+
     this.callbacks.onRelocate?.({
       fraction: Math.min(1, Math.max(0, fraction)),
       section: {
         current: this.currentIndex,
         total: this.book.spine.length,
       },
+      cfi,
     });
   }
 
@@ -393,5 +464,98 @@ ${this.extractBody(item.content)}
       (doc.head || doc.documentElement).appendChild(styleEl);
     }
     styleEl.textContent = this.currentStyles;
+  }
+
+  // ─── CFI helpers ──────────────────────────────────────
+
+  /** Encontrar el primer nodo de texto visible en la página actual */
+  private findFirstVisibleTextNode(doc: Document): Text | null {
+    const containerWidth = this.iframe.clientWidth;
+    const scrollLeft = doc.documentElement.scrollLeft || doc.body?.scrollLeft || 0;
+    const viewStart = scrollLeft;
+    const viewEnd = scrollLeft + containerWidth;
+
+    const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, {
+      acceptNode: (node) => {
+        if (!node.textContent?.trim()) return NodeFilter.FILTER_SKIP;
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
+
+    let node: Text | null;
+    while ((node = walker.nextNode() as Text | null)) {
+      const range = doc.createRange();
+      range.selectNodeContents(node);
+      const rects = range.getClientRects();
+      for (const rect of rects) {
+        const absLeft = rect.left + scrollLeft;
+        if (absLeft >= viewStart && absLeft < viewEnd) {
+          return node;
+        }
+      }
+    }
+    return null;
+  }
+
+  /** Construir un path CFI desde un nodo hasta el body */
+  private buildNodePath(node: Node, root: Node): string {
+    const steps: string[] = [];
+    let current: Node | null = node;
+
+    while (current && current !== root) {
+      const parent: Node | null = current.parentNode;
+      if (!parent) break;
+
+      let index = 0;
+      for (const child of Array.from(parent.childNodes)) {
+        if (child.nodeType === Node.ELEMENT_NODE) index += 2;
+        if (child === current) break;
+      }
+      // Nodos de texto usan paso impar
+      if (current.nodeType === Node.TEXT_NODE) {
+        steps.unshift(`/${index + 1}`);
+      } else {
+        const el = current as Element;
+        const id = el.id ? `[${el.id}]` : '';
+        steps.unshift(`/${index}${id}`);
+      }
+      current = parent;
+    }
+
+    return '/4' + steps.join(''); // /4 = body
+  }
+
+  /** Parsear un CFI y extraer spine index + info de navegación */
+  private parseCFI(cfi: string): { spineIndex: number; elementId?: string; pageEstimate: number } | null {
+    // Formato: epubcfi(/6/{spineStep}[id]!/{path}:offset)
+    const match = cfi.match(/epubcfi\(\/6\/(\d+)(?:\[([^\]]*)\])?(?:!(.+))?\)/);
+    if (!match) return null;
+
+    const spineStep = parseInt(match[1], 10);
+    const spineIndex = Math.max(0, (spineStep / 2) - 1);
+    const idFromSpine = match[2] || undefined;
+    const innerPath = match[3] || '';
+
+    // Intentar extraer un ID de elemento del path interno
+    let elementId: string | undefined;
+    const idMatch = innerPath.match(/\[([^\]]+)\]/);
+    if (idMatch) elementId = idMatch[1];
+
+    // Si no hay ID, buscar por spine id
+    if (!elementId && idFromSpine) {
+      // Verificar que el spineIndex coincida
+      const item = this.book.spine[spineIndex];
+      if (item && item.id !== idFromSpine) {
+        // Buscar por ID del spine
+        const idx = this.book.spine.findIndex(s => s.id === idFromSpine);
+        if (idx >= 0) return { spineIndex: idx, elementId, pageEstimate: 0 };
+      }
+    }
+
+    // Estimar página basado en los steps del path (heurística simple)
+    const pathSteps = innerPath.match(/\/\d+/g) || [];
+    const pageEstimate = pathSteps.length > 2 ? Math.floor(parseInt(pathSteps[1]?.replace('/', '') || '0', 10) / 4) : 0;
+
+    return { spineIndex, elementId, pageEstimate };
   }
 }
