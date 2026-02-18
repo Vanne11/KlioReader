@@ -84,7 +84,6 @@ export function FoliateReader({
             fraction: detail.fraction,
             sectionIndex: detail.section.current,
             sectionTotal: detail.section.total,
-            cfi: detail.cfi,
           });
         },
         onLoad: (detail) => {
@@ -124,8 +123,6 @@ export function FoliateReader({
         prev: () => renderer?.prev(),
         goTo: (target: number) => renderer?.goTo(target),
         goToFraction: (frac: number) => renderer?.goToFraction(frac),
-        getCFI: () => renderer?.getCFI() || '',
-        goToCFI: (cfi: string) => renderer?.goToCFI(cfi),
         close: () => renderer?.destroy(),
       };
 
