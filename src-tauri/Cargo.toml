@@ -41,6 +41,8 @@ hex = "0.4"
 async-trait = "0.1"
 open = "5"
 zip = "2"
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
 unrar = "0.5"
 notify = "7"
 notify-debouncer-full = "0.4"

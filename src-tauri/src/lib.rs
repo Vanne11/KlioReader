@@ -3,7 +3,9 @@ mod watcher;
 
 use serde::{Serialize, Deserialize};
 use std::path::Path;
-use std::io::{Read as IoRead, Write as IoWrite, Cursor};
+use std::io::Read as IoRead;
+#[cfg(not(target_os = "android"))]
+use std::io::{Write as IoWrite, Cursor};
 use tauri::Manager;
 use std::sync::Arc;
 use epub::doc::EpubDoc;
@@ -34,61 +36,250 @@ fn greet(name: &str) -> String {
 }
 
 fn read_epub_metadata(path: &Path) -> Result<BookMetadata, String> {
-    let mut doc = EpubDoc::new(path).map_err(|e| e.to_string())?;
-    
-    let title = doc.mdata("title").map(|m| m.value.clone()).unwrap_or_else(|| "Unknown Title".to_string());
-    let author = doc.mdata("creator").map(|m| m.value.clone()).unwrap_or_else(|| "Unknown Author".to_string());
-    let description = doc.mdata("description").map(|m| m.value.clone());
-    let publisher = doc.mdata("publisher").map(|m| m.value.clone());
-    let language = doc.mdata("language").map(|m| m.value.clone());
-    let date = doc.mdata("date").map(|m| m.value.clone());
-    let subject = doc.mdata("subject").map(|m| m.value.clone());
-    let total_chapters = doc.get_num_chapters();
-    
-    let cover = doc.get_cover().map(|(data, _mime)| {
-        general_purpose::STANDARD.encode(data)
-    });
+    // Try zip-based extraction first (reliable on all platforms including Android)
+    if let Ok(meta) = read_epub_metadata_zip(path) {
+        if meta.total_chapters > 0 {
+            return Ok(meta);
+        }
+    }
+
+    // Fallback to epub crate (better chapter counting for some edge cases)
+    if let Ok(mut doc) = EpubDoc::new(path) {
+        let title = doc.mdata("title").map(|m| m.value.clone()).unwrap_or_else(|| "Unknown Title".to_string());
+        let author = doc.mdata("creator").map(|m| m.value.clone()).unwrap_or_else(|| "Unknown Author".to_string());
+        let description = doc.mdata("description").map(|m| m.value.clone());
+        let publisher = doc.mdata("publisher").map(|m| m.value.clone());
+        let language = doc.mdata("language").map(|m| m.value.clone());
+        let date = doc.mdata("date").map(|m| m.value.clone());
+        let subject = doc.mdata("subject").map(|m| m.value.clone());
+        let total_chapters = doc.get_num_chapters();
+        let cover = doc.get_cover().map(|(data, _mime)| {
+            general_purpose::STANDARD.encode(data)
+        });
+        return Ok(BookMetadata { title, author, cover, description, publisher, language, date, subject, total_chapters });
+    }
+
+    Err("Could not parse EPUB metadata".to_string())
+}
+
+/// Lightweight EPUB metadata extractor using zip crate directly.
+/// Parses container.xml → OPF file → extracts title, author, cover.
+fn read_epub_metadata_zip(path: &Path) -> Result<BookMetadata, String> {
+    let file = std::fs::File::open(path).map_err(|e| format!("Cannot open EPUB: {}", e))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("Invalid EPUB ZIP: {}", e))?;
+
+    // 1. Read container.xml to find OPF path
+    let opf_path = {
+        let mut container = archive.by_name("META-INF/container.xml")
+            .map_err(|_| "No container.xml found".to_string())?;
+        let mut xml = String::new();
+        container.read_to_string(&mut xml).map_err(|e| e.to_string())?;
+        extract_opf_path(&xml).ok_or_else(|| "Cannot find OPF path in container.xml".to_string())?
+    };
+
+    // 2. Read OPF file
+    let (opf_xml, opf_dir) = {
+        let mut opf = archive.by_name(&opf_path)
+            .map_err(|_| format!("OPF file not found: {}", opf_path))?;
+        let mut xml = String::new();
+        opf.read_to_string(&mut xml).map_err(|e| e.to_string())?;
+        let dir = opf_path.rfind('/').map(|i| &opf_path[..=i]).unwrap_or("").to_string();
+        (xml, dir)
+    };
+
+    // 3. Extract metadata from OPF
+    let title = extract_xml_tag(&opf_xml, "dc:title")
+        .or_else(|| extract_xml_tag(&opf_xml, "title"))
+        .unwrap_or_else(|| path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default());
+    let author = extract_xml_tag(&opf_xml, "dc:creator")
+        .or_else(|| extract_xml_tag(&opf_xml, "creator"))
+        .unwrap_or_else(|| "Unknown".to_string());
+    let description = extract_xml_tag(&opf_xml, "dc:description").or_else(|| extract_xml_tag(&opf_xml, "description"));
+    let publisher = extract_xml_tag(&opf_xml, "dc:publisher").or_else(|| extract_xml_tag(&opf_xml, "publisher"));
+    let language = extract_xml_tag(&opf_xml, "dc:language").or_else(|| extract_xml_tag(&opf_xml, "language"));
+    let date = extract_xml_tag(&opf_xml, "dc:date").or_else(|| extract_xml_tag(&opf_xml, "date"));
+    let subject = extract_xml_tag(&opf_xml, "dc:subject").or_else(|| extract_xml_tag(&opf_xml, "subject"));
+
+    // Count spine items (chapters)
+    let total_chapters = opf_xml.matches("<itemref").count();
+
+    // 4. Try to extract cover image
+    let cover = extract_epub_cover_zip(&mut archive, &opf_xml, &opf_dir);
 
     Ok(BookMetadata { title, author, cover, description, publisher, language, date, subject, total_chapters })
 }
 
+fn extract_opf_path(container_xml: &str) -> Option<String> {
+    // Find full-path="..." in <rootfile> element
+    let rootfile_start = container_xml.find("<rootfile")?;
+    let after = &container_xml[rootfile_start..];
+    let fp_start = after.find("full-path=\"")? + 11;
+    let fp_end = after[fp_start..].find('"')? + fp_start;
+    Some(after[fp_start..fp_end].to_string())
+}
+
+fn extract_xml_tag(xml: &str, tag: &str) -> Option<String> {
+    // Simple extraction: find <tag...>content</tag> or <ns:tag...>content</ns:tag>
+    let open_pattern = format!("<{}", tag);
+    let close_pattern = format!("</{}", tag);
+    let start_pos = xml.find(&open_pattern)?;
+    let after_open = &xml[start_pos..];
+    let content_start = after_open.find('>')? + 1;
+    let content_end = after_open.find(&close_pattern)?;
+    let content = after_open[content_start..content_end].trim();
+    if content.is_empty() { None } else { Some(html_decode_basic(content)) }
+}
+
+fn html_decode_basic(s: &str) -> String {
+    s.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'")
+}
+
+fn extract_epub_cover_zip(archive: &mut zip::ZipArchive<std::fs::File>, opf_xml: &str, opf_dir: &str) -> Option<String> {
+    // Try to find cover href from OPF metadata
+    let cover_href = find_cover_href_epub2(opf_xml)
+        .or_else(|| find_cover_href_epub3(opf_xml));
+
+    if let Some(href) = cover_href {
+        let cover_path = if href.starts_with('/') {
+            href[1..].to_string()
+        } else {
+            format!("{}{}", opf_dir, href)
+        };
+        if let Some(data) = read_zip_entry(archive, &cover_path) {
+            return Some(general_purpose::STANDARD.encode(&data));
+        }
+        // Try href without opf_dir prefix too
+        if let Some(data) = read_zip_entry(archive, &href) {
+            return Some(general_purpose::STANDARD.encode(&data));
+        }
+    }
+
+    // Fallback: search for files with "cover" in the name
+    let names: Vec<String> = (0..archive.len())
+        .filter_map(|i| archive.by_index(i).ok().map(|e| e.name().to_string()))
+        .collect();
+    for name in &names {
+        let lower = name.to_lowercase();
+        if is_image_file(&lower) && (lower.contains("cover") || lower.contains("portada")) {
+            if let Some(data) = read_zip_entry(archive, name) {
+                return Some(general_purpose::STANDARD.encode(&data));
+            }
+        }
+    }
+
+    None
+}
+
+fn read_zip_entry(archive: &mut zip::ZipArchive<std::fs::File>, name: &str) -> Option<Vec<u8>> {
+    let mut entry = archive.by_name(name).ok()?;
+    let mut buf = Vec::new();
+    entry.read_to_end(&mut buf).ok()?;
+    if buf.is_empty() { None } else { Some(buf) }
+}
+
+/// EPUB2: <meta name="cover" content="cover-image-id"/> → find <item id="cover-image-id" href="..."/>
+fn find_cover_href_epub2(opf_xml: &str) -> Option<String> {
+    let meta_pos = opf_xml.find("name=\"cover\"")?;
+    // Search the full <meta> element (go back to find '<')
+    let elem_start = opf_xml[..meta_pos].rfind('<')?;
+    let elem_end = opf_xml[meta_pos..].find('>')? + meta_pos;
+    let elem = &opf_xml[elem_start..=elem_end];
+
+    let content_start = elem.find("content=\"")? + 9;
+    let content_end = elem[content_start..].find('"')? + content_start;
+    let cover_id = &elem[content_start..content_end];
+
+    find_item_href(opf_xml, cover_id)
+}
+
+/// EPUB3: <item ... properties="cover-image" href="..."/>
+fn find_cover_href_epub3(opf_xml: &str) -> Option<String> {
+    let prop_pos = opf_xml.find("properties=\"cover-image\"")?;
+    let elem_start = opf_xml[..prop_pos].rfind('<')?;
+    let elem_end = opf_xml[prop_pos..].find('>')? + prop_pos;
+    let elem = &opf_xml[elem_start..=elem_end];
+
+    let href_start = elem.find("href=\"")? + 6;
+    let href_end = elem[href_start..].find('"')? + href_start;
+    Some(elem[href_start..href_end].to_string())
+}
+
+fn find_item_href(opf_xml: &str, item_id: &str) -> Option<String> {
+    let search = format!("id=\"{}\"", item_id);
+    let pos = opf_xml.find(&search)?;
+    let item_start = opf_xml[..pos].rfind('<')?;
+    let item_end = opf_xml[pos..].find('>')? + pos;
+    let item = &opf_xml[item_start..=item_end];
+
+    let href_start = item.find("href=\"")? + 6;
+    let href_end = item[href_start..].find('"')? + href_start;
+    Some(item[href_start..href_end].to_string())
+}
+
 fn read_pdf_metadata(path: &Path) -> Result<BookMetadata, String> {
-    let doc = Document::load(path).map_err(|e| e.to_string())?;
-    let total_chapters = doc.get_pages().len();
-    
-    let info_obj = doc.trailer.get(b"Info").ok();
-    let info = if let Some(obj) = info_obj {
-        if let Ok(id) = obj.as_reference() {
-            doc.get_dictionary(id).ok()
+    // Try lopdf first
+    if let Ok(doc) = Document::load(path) {
+        let total_chapters = doc.get_pages().len();
+
+        let info_obj = doc.trailer.get(b"Info").ok();
+        let info = if let Some(obj) = info_obj {
+            if let Ok(id) = obj.as_reference() {
+                doc.get_dictionary(id).ok()
+            } else {
+                None
+            }
         } else {
             None
-        }
-    } else {
-        None
-    };
+        };
 
-    let get_field = |key: &[u8]| {
-        info.and_then(|dict| dict.get(key).ok())
-            .and_then(|obj| {
-                if let Ok(s) = obj.as_name_str() { Some(s.to_string()) }
-                else if let Ok(s) = obj.as_string() { Some(s.to_string()) }
-                else { None }
-            })
-    };
+        let get_field = |key: &[u8]| {
+            info.and_then(|dict| dict.get(key).ok())
+                .and_then(|obj| {
+                    if let Ok(s) = obj.as_name_str() { Some(s.to_string()) }
+                    else if let Ok(s) = obj.as_string() { Some(s.to_string()) }
+                    else { None }
+                })
+        };
 
-    let title = get_field(b"Title").unwrap_or_else(|| "Unknown PDF Title".to_string());
-    let author = get_field(b"Author").unwrap_or_else(|| "Unknown PDF Author".to_string());
+        let title = get_field(b"Title").unwrap_or_else(||
+            path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "PDF".to_string())
+        );
+        let author = get_field(b"Author").unwrap_or_else(|| "Unknown".to_string());
 
-    Ok(BookMetadata { 
-        title, 
-        author, 
-        cover: None, 
-        description: get_field(b"Subject"), 
-        publisher: get_field(b"Producer"), 
-        language: None, 
-        date: get_field(b"CreationDate"), 
-        subject: get_field(b"Subject"),
-        total_chapters
+        return Ok(BookMetadata {
+            title, author, cover: None,
+            description: get_field(b"Subject"),
+            publisher: get_field(b"Producer"),
+            language: None,
+            date: get_field(b"CreationDate"),
+            subject: get_field(b"Subject"),
+            total_chapters
+        });
+    }
+
+    // Fallback: basic metadata from filename + count pages by scanning for /Type /Page
+    let title = path.file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "PDF".to_string());
+
+    // Try to count pages from raw bytes (search for "/Type /Page" or "/Type/Page")
+    let total_chapters = std::fs::read(path).ok()
+        .map(|bytes| {
+            let content = String::from_utf8_lossy(&bytes);
+            // Count "/Type /Page" but not "/Type /Pages" (the page tree)
+            content.matches("/Type /Page\n").count()
+                + content.matches("/Type /Page\r").count()
+                + content.matches("/Type /Page ").count()
+                + content.matches("/Type/Page\n").count()
+                + content.matches("/Type/Page\r").count()
+                + content.matches("/Type/Page ").count()
+        })
+        .unwrap_or(0);
+
+    Ok(BookMetadata {
+        title, author: "Unknown".to_string(), cover: None,
+        description: None, publisher: None, language: None, date: None, subject: None,
+        total_chapters: if total_chapters > 0 { total_chapters } else { 1 },
     })
 }
 
@@ -181,6 +372,7 @@ fn read_cbz_metadata(path: &Path) -> Result<BookMetadata, String> {
     })
 }
 
+#[cfg(not(target_os = "android"))]
 fn read_cbr_metadata(path: &Path) -> Result<BookMetadata, String> {
     let archive = unrar::Archive::new(path).open_for_listing()
         .map_err(|e| format!("Error abriendo CBR: {}", e))?;
@@ -221,6 +413,26 @@ fn read_cbr_metadata(path: &Path) -> Result<BookMetadata, String> {
     })
 }
 
+#[cfg(target_os = "android")]
+fn read_cbr_metadata(path: &Path) -> Result<BookMetadata, String> {
+    let title = path.file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "Comic".to_string());
+
+    Ok(BookMetadata {
+        title,
+        author: "Unknown".to_string(),
+        cover: None,
+        description: None,
+        publisher: None,
+        language: None,
+        date: None,
+        subject: Some("Comic".to_string()),
+        total_chapters: 0,
+    })
+}
+
+#[cfg(not(target_os = "android"))]
 fn extract_first_rar_image(path: &Path, target_name: &str) -> Option<Vec<u8>> {
     let archive = unrar::Archive::new(path).open_for_processing().ok()?;
     let mut cursor = archive;
@@ -238,6 +450,7 @@ fn extract_first_rar_image(path: &Path, target_name: &str) -> Option<Vec<u8>> {
     }
 }
 
+#[cfg(not(target_os = "android"))]
 #[tauri::command]
 fn convert_cbr_to_cbz(path: String) -> Result<Vec<u8>, String> {
     let archive = unrar::Archive::new(&path).open_for_processing()
@@ -295,6 +508,12 @@ fn convert_cbr_to_cbz(path: String) -> Result<Vec<u8>, String> {
     Ok(buf.into_inner())
 }
 
+#[cfg(target_os = "android")]
+#[tauri::command]
+fn convert_cbr_to_cbz(_path: String) -> Result<Vec<u8>, String> {
+    Err("Conversión CBR→CBZ no disponible en Android. Los CBR se leen via WASM.".to_string())
+}
+
 #[tauri::command]
 fn get_metadata(path: String) -> Result<BookMetadata, String> {
     let path = Path::new(&path);
@@ -344,11 +563,28 @@ fn infer_order_from_filename(filename: &str) -> Option<u32> {
 
 fn scan_book_entry(file_path: &Path, subfolder: Option<String>) -> Option<ScanResult> {
     let ext = file_path.extension().and_then(|s| s.to_str()).unwrap_or("");
-    if !matches!(ext.to_lowercase().as_str(), "epub" | "pdf" | "cbz" | "cbr") {
+    let ext_lower = ext.to_lowercase();
+    if !matches!(ext_lower.as_str(), "epub" | "pdf" | "cbz" | "cbr") {
         return None;
     }
 
-    let meta = get_metadata(file_path.to_string_lossy().to_string()).ok()?;
+    let meta = get_metadata(file_path.to_string_lossy().to_string()).unwrap_or_else(|e| {
+        eprintln!("[scan] Metadata fallback for {:?}: {}", file_path.file_name(), e);
+        let title = file_path.file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "Unknown".to_string());
+        BookMetadata {
+            title,
+            author: "Unknown".to_string(),
+            cover: None,
+            description: None,
+            publisher: None,
+            language: None,
+            date: None,
+            subject: if ext_lower == "cbz" || ext_lower == "cbr" { Some("Comic".to_string()) } else { None },
+            total_chapters: 0,
+        }
+    });
     let filename = file_path.file_name()?.to_str()?;
 
     let inferred_order = if subfolder.is_some() {
@@ -433,6 +669,14 @@ fn get_random_snippet(path: String) -> Result<String, String> {
 #[tauri::command]
 fn read_file_bytes(path: String) -> Result<Vec<u8>, String> {
     std::fs::read(&path).map_err(|e| format!("Error leyendo archivo: {}", e))
+}
+
+/// Returns file as base64 string — reliable IPC for large files on Android
+/// (Vec<u8> becomes a huge JSON array, ipc::Response/convertFileSrc don't work on Android WebView)
+#[tauri::command]
+fn read_file_base64(path: String) -> Result<String, String> {
+    let bytes = std::fs::read(&path).map_err(|e| format!("Error leyendo archivo: {}", e))?;
+    Ok(general_purpose::STANDARD.encode(&bytes))
 }
 
 #[tauri::command]
@@ -549,6 +793,12 @@ struct ComicPages {
 
 #[tauri::command]
 fn extract_comic_pages(app: tauri::AppHandle, path: String, book_type: String) -> Result<ComicPages, String> {
+    // En Android, CBR se extrae via WASM en el frontend; este comando no se llama para CBR.
+    #[cfg(target_os = "android")]
+    if book_type == "cbr" {
+        return Err("En Android los CBR se extraen via WASM en el frontend.".to_string());
+    }
+
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -562,8 +812,9 @@ fn extract_comic_pages(app: tauri::AppHandle, path: String, book_type: String) -
 
     let mut image_paths: Vec<String> = Vec::new();
 
+    #[cfg(not(target_os = "android"))]
     if book_type == "cbr" {
-        // Extraer imágenes del RAR
+        // Extraer imágenes del RAR (solo desktop)
         let archive = unrar::Archive::new(&path).open_for_processing()
             .map_err(|e| format!("Error abriendo CBR: {}", e))?;
 
@@ -605,8 +856,10 @@ fn extract_comic_pages(app: tauri::AppHandle, path: String, book_type: String) -
                 .map_err(|e| format!("Error escribiendo imagen: {}", e))?;
             image_paths.push(out_path.to_string_lossy().to_string());
         }
-    } else {
-        // CBZ (ZIP)
+    }
+
+    if book_type != "cbr" {
+        // CBZ (ZIP) - funciona en todas las plataformas
         let file = std::fs::File::open(&path).map_err(|e| e.to_string())?;
         let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
 
@@ -662,6 +915,7 @@ pub fn run() {
             read_epub_resource,
             convert_cbr_to_cbz,
             read_file_bytes,
+            read_file_base64,
             save_file_bytes,
             download_file_to_disk,
             copy_file,

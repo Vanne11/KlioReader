@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useCallback, useState } from 'react';
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import {
   X, ZoomIn, ZoomOut, Scroll as ScrollIcon, Columns2, Square, Maximize, Minimize,
   Settings2, StickyNote, Bookmark as BookmarkIcon, Plus, MessageSquare,
@@ -55,6 +55,23 @@ export function ReaderView() {
   const { loadSharedNotes, toggleVisibility } = useSharedNotes();
   const voice = useVoiceNotes();
   const [showSharedNotes, setShowSharedNotes] = useState(false);
+  const [pdfData, setPdfData] = useState<{ data: Uint8Array } | null>(null);
+
+  // Load PDF as base64 and decode (all other IPC methods fail on Android WebView)
+  useEffect(() => {
+    if (!currentBook || currentBook.type !== 'pdf') { setPdfData(null); return; }
+    let cancelled = false;
+    invoke<string>('read_file_base64', { path: currentBook.path })
+      .then(b64 => {
+        if (cancelled) return;
+        const bin = atob(b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        setPdfData({ data: bytes });
+      })
+      .catch(err => console.error('[PDF] Error loading:', err));
+    return () => { cancelled = true; };
+  }, [currentBook?.path, currentBook?.type]);
 
   const cloudBookId = useMemo(() => {
     if (!currentBook) return undefined;
@@ -207,9 +224,13 @@ export function ReaderView() {
               style={{ fontSize: `${fontSize}px`, lineHeight: '1.8', fontFamily: readerFont }}
             >
               <div className="flex justify-center">
-                <Document file={convertFileSrc(currentBook.path)} onLoadSuccess={({ numPages }) => setNumPages(numPages)}>
-                  <Page pageNumber={currentBook.currentChapter + 1} scale={scale} renderAnnotationLayer={false} renderTextLayer={true} className="shadow-2xl" />
-                </Document>
+                {pdfData ? (
+                  <Document file={pdfData} onLoadSuccess={({ numPages }) => setNumPages(numPages)}>
+                    <Page pageNumber={currentBook.currentChapter + 1} scale={scale} renderAnnotationLayer={false} renderTextLayer={true} className="shadow-2xl" />
+                  </Document>
+                ) : (
+                  <div className="flex items-center justify-center py-20 opacity-50 text-sm">Cargando PDF...</div>
+                )}
               </div>
             </div>
           )}

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import type { Book, ReaderTheme } from '@/types';
+import { usePlatform } from '@/hooks/usePlatform';
+import { extractCbrPagesWasm, cleanupCbrWasmPages } from '@/lib/cbrExtractor';
 
 interface ComicReaderProps {
   bookPath: string;
@@ -21,12 +23,14 @@ const THEME_BG: Record<ReaderTheme, string> = {
 export function ComicReader({
   bookPath, bookType, theme, initialSection, onRelocate, onReady,
 }: ComicReaderProps) {
+  const { isMobilePlatform } = usePlatform();
   const [pages, setPages] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [zoomed, setZoomed] = useState(false);
 
   const tempDirRef = useRef<string | null>(null);
+  const usedWasmRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const pageRefs = useRef<(HTMLDivElement | null)[]>([]);
   const currentPageRef = useRef(0);
@@ -54,19 +58,30 @@ export function ComicReader({
         setLoading(true);
         setError(null);
 
-        const result: { temp_dir: string; pages: string[] } = await invoke('extract_comic_pages', {
-          path: bookPath,
-          bookType,
-        });
-
-        if (cancelled) {
-          invoke('cleanup_comic_temp', { tempDir: result.temp_dir }).catch(() => {});
-          return;
+        // Android + CBR → WASM (evita compilar C++ unrar para Android)
+        // Desktop o CBZ → Rust (zip crate es pure-Rust, funciona en todas las plataformas)
+        if (isMobilePlatform && bookType === 'cbr') {
+          const result = await extractCbrPagesWasm(bookPath);
+          if (cancelled) {
+            cleanupCbrWasmPages(result.pages);
+            return;
+          }
+          usedWasmRef.current = true;
+          setPages(result.pages);
+        } else {
+          const result: { temp_dir: string; pages: string[] } = await invoke('extract_comic_pages', {
+            path: bookPath,
+            bookType,
+          });
+          if (cancelled) {
+            invoke('cleanup_comic_temp', { tempDir: result.temp_dir }).catch(() => {});
+            return;
+          }
+          usedWasmRef.current = false;
+          tempDirRef.current = result.temp_dir;
+          setPages(result.pages.map(p => convertFileSrc(p)));
         }
 
-        tempDirRef.current = result.temp_dir;
-        const urls = result.pages.map(p => convertFileSrc(p));
-        setPages(urls);
         setLoading(false);
       } catch (e: any) {
         if (!cancelled) {
@@ -80,12 +95,14 @@ export function ComicReader({
 
     return () => {
       cancelled = true;
-      if (tempDirRef.current) {
+      if (usedWasmRef.current) {
+        cleanupCbrWasmPages(pages);
+      } else if (tempDirRef.current) {
         invoke('cleanup_comic_temp', { tempDir: tempDirRef.current }).catch(() => {});
         tempDirRef.current = null;
       }
     };
-  }, [bookPath, bookType]);
+  }, [bookPath, bookType, isMobilePlatform]);
 
   // Set up IntersectionObserver for page tracking
   useEffect(() => {
