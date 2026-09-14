@@ -44,4 +44,5 @@ builds/
 # Env
 .env
 .env.*
-*.localpnpm-lock.yaml
+*.local
+pnpm-lock.yaml
