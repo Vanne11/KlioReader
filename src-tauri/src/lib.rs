@@ -93,6 +93,12 @@ fn read_pdf_metadata(path: &Path) -> Result<BookMetadata, String> {
 }
 
 #[tauri::command]
+fn read_file_base64(path: String) -> Result<String, String> {
+    let data = std::fs::read(&path).map_err(|e| format!("Error leyendo {}: {}", path, e))?;
+    Ok(general_purpose::STANDARD.encode(&data))
+}
+
+#[tauri::command]
 fn read_epub_resource(path: String, resource_path: String) -> Result<(Vec<u8>, String), String> {
     let mut doc = EpubDoc::new(path).map_err(|e| e.to_string())?;
 
@@ -348,8 +354,30 @@ fn scan_book_entry(file_path: &Path, subfolder: Option<String>) -> Option<ScanRe
         return None;
     }
 
-    let meta = get_metadata(file_path.to_string_lossy().to_string()).ok()?;
     let filename = file_path.file_name()?.to_str()?;
+
+    // Intentar obtener metadata; si falla, crear metadata mínima con el nombre del archivo
+    let meta = match get_metadata(file_path.to_string_lossy().to_string()) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("[scan] Error leyendo metadata de {}: {}", file_path.display(), e);
+            let stem = file_path.file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("Libro desconocido")
+                .to_string();
+            BookMetadata {
+                title: stem,
+                author: "Desconocido".to_string(),
+                cover: None,
+                description: None,
+                publisher: None,
+                language: None,
+                date: None,
+                subject: None,
+                total_chapters: 1,
+            }
+        }
+    };
 
     let inferred_order = if subfolder.is_some() {
         infer_order_from_filename(filename)
@@ -473,6 +501,35 @@ fn file_exists(path: String) -> bool {
 #[tauri::command]
 fn is_mobile_platform() -> bool {
     cfg!(target_os = "android") || cfg!(target_os = "ios")
+}
+
+/// Diagnóstico: lista archivos en un directorio con info de cada uno
+#[tauri::command]
+fn debug_list_files(dir_path: String) -> Result<Vec<String>, String> {
+    let path = Path::new(&dir_path);
+    if !path.exists() {
+        return Err(format!("Directorio no existe: {}", dir_path));
+    }
+    if !path.is_dir() {
+        return Err(format!("No es un directorio: {}", dir_path));
+    }
+    let mut info = Vec::new();
+    for entry in std::fs::read_dir(path).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let fp = entry.path();
+        let size = fp.metadata().map(|m| m.len()).unwrap_or(0);
+        let ext = fp.extension().and_then(|s| s.to_str()).unwrap_or("?");
+        let meta_status = if matches!(ext.to_lowercase().as_str(), "epub" | "pdf" | "cbz" | "cbr") {
+            match get_metadata(fp.to_string_lossy().to_string()) {
+                Ok(m) => format!("OK title={}", m.title),
+                Err(e) => format!("ERROR: {}", e),
+            }
+        } else {
+            "skip".to_string()
+        };
+        info.push(format!("{} | {}B | .{} | {}", fp.display(), size, ext, meta_status));
+    }
+    Ok(info)
 }
 
 #[tauri::command]
@@ -658,7 +715,9 @@ pub fn run() {
             scan_directory,
             get_random_snippet,
             is_mobile_platform,
+            debug_list_files,
             get_default_library_path,
+            read_file_base64,
             read_epub_resource,
             convert_cbr_to_cbz,
             read_file_bytes,

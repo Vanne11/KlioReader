@@ -191,6 +191,7 @@ function registerIframeEvents(doc: Document, renderer: EpubRenderer) {
 
   doc.addEventListener('touchstart', (e: TouchEvent) => {
     const touch = e.touches[0];
+    if (!touch) return;
     startX = touch.clientX;
     startY = touch.clientY;
     startTime = Date.now();
@@ -198,6 +199,7 @@ function registerIframeEvents(doc: Document, renderer: EpubRenderer) {
 
   doc.addEventListener('touchend', (e: TouchEvent) => {
     const touch = e.changedTouches[0];
+    if (!touch) return;
     const dx = touch.clientX - startX;
     const dy = touch.clientY - startY;
     const elapsed = Date.now() - startTime;

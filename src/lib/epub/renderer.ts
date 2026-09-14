@@ -25,15 +25,16 @@ export class EpubRenderer {
   private currentPage: number = 0;
   private totalPages: number = 1;
 
+  private destroyed: boolean = false;
+
   constructor(container: HTMLElement, book: EpubBook, callbacks: RendererCallbacks) {
     this.container = container;
     this.book = book;
     this.callbacks = callbacks;
 
-    // Crear iframe
+    // Crear iframe — sin sandbox para máxima compatibilidad con Android WebView
     this.iframe = document.createElement('iframe');
     this.iframe.style.cssText = 'width:100%;height:100%;border:none;display:block;';
-    this.iframe.setAttribute('sandbox', 'allow-same-origin allow-scripts');
     this.container.appendChild(this.iframe);
   }
 
@@ -50,7 +51,10 @@ export class EpubRenderer {
 
   setStyles(css: string): void {
     this.currentStyles = css;
-    this.applyStylesToIframe();
+    // Intentar aplicar en caliente; si falla, re-renderizar
+    if (!this.applyStylesToIframe()) {
+      this.renderCurrentSection();
+    }
   }
 
   setFlow(flow: FlowMode): void {
@@ -204,8 +208,9 @@ export class EpubRenderer {
 
   /** Destruir el renderer y liberar recursos */
   destroy(): void {
+    this.destroyed = true;
     this.iframe.remove();
-    // Revocar blob URLs
+    // Revocar blob URLs de recursos (imágenes, CSS, fuentes)
     for (const [, url] of this.book.resources) {
       try { URL.revokeObjectURL(url); } catch {}
     }
@@ -216,9 +221,6 @@ export class EpubRenderer {
   private async renderCurrentSection(): Promise<void> {
     const item = this.book.spine[this.currentIndex];
     if (!item?.content) return;
-
-    const doc = this.iframe.contentDocument;
-    if (!doc) return;
 
     // Construir HTML completo para el iframe
     const isPaginated = this.flow === 'paginated';
@@ -245,12 +247,24 @@ ${this.extractBody(item.content)}
 </body>
 </html>`;
 
-    doc.open();
-    doc.write(html);
-    doc.close();
+    // Usar srcdoc — mismo origen, contentDocument siempre accesible, compatible con Android WebView
+    await new Promise<void>((resolve) => {
+      const timeout = setTimeout(() => resolve(), 3000); // safety net
+      this.iframe.onload = () => {
+        clearTimeout(timeout);
+        resolve();
+      };
+      this.iframe.srcdoc = html;
+    });
 
-    // Esperar a que el iframe renderice
+    if (this.destroyed) return;
+
+    const doc = this.iframe.contentDocument;
+    if (!doc) return;
+
+    // Esperar a que las imágenes carguen
     await this.waitForRender(doc);
+    if (this.destroyed) return;
 
     // Calcular paginación
     if (isPaginated) {
@@ -359,23 +373,29 @@ ${this.extractBody(item.content)}
 
   private waitForRender(doc: Document): Promise<void> {
     return new Promise(resolve => {
-      // Esperar a que las imágenes carguen o timeout
       const images = doc.querySelectorAll('img');
       if (images.length === 0) {
         requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
         return;
       }
 
+      let resolved = false;
+      const done = () => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(timeout);
+        requestAnimationFrame(() => resolve());
+      };
+
       let loaded = 0;
       const total = images.length;
       const check = () => {
         loaded++;
-        if (loaded >= total) {
-          requestAnimationFrame(() => resolve());
-        }
+        if (loaded >= total) done();
       };
 
-      const timeout = setTimeout(() => resolve(), 2000);
+      // 5s timeout para Android (dispositivos lentos)
+      const timeout = setTimeout(() => done(), 5000);
 
       images.forEach(img => {
         if (img.complete) {
@@ -385,13 +405,6 @@ ${this.extractBody(item.content)}
           img.addEventListener('error', check, { once: true });
         }
       });
-
-      // Cleanup timeout si se resuelve antes
-      const origResolve = resolve;
-      resolve = () => {
-        clearTimeout(timeout);
-        origResolve();
-      };
     });
   }
 
@@ -401,12 +414,11 @@ ${this.extractBody(item.content)}
       this.totalPages = 1;
       return;
     }
-    const containerWidth = this.iframe.clientWidth;
+    const containerWidth = this.iframe.clientWidth || this.container.clientWidth;
     if (containerWidth <= 0) {
       this.totalPages = 1;
       return;
     }
-    // scrollWidth del body nos da el ancho total del contenido en columnas
     const scrollWidth = body.scrollWidth;
     this.totalPages = Math.max(1, Math.ceil(scrollWidth / containerWidth));
   }
@@ -452,9 +464,9 @@ ${this.extractBody(item.content)}
     });
   }
 
-  private applyStylesToIframe(): void {
+  private applyStylesToIframe(): boolean {
     const doc = this.iframe.contentDocument;
-    if (!doc) return;
+    if (!doc) return false;
 
     // Buscar o crear un <style id="klio-theme">
     let styleEl = doc.getElementById('klio-theme') as HTMLStyleElement | null;
@@ -464,6 +476,7 @@ ${this.extractBody(item.content)}
       (doc.head || doc.documentElement).appendChild(styleEl);
     }
     styleEl.textContent = this.currentStyles;
+    return true;
   }
 
   // ─── CFI helpers ──────────────────────────────────────

@@ -215,15 +215,25 @@ export function useCloudBooks() {
         const token = localStorage.getItem("authToken") || "";
         await invoke("download_file_to_disk", { url: downloadUrl, path: savePath, token });
       }
+
+      // Verificar que el archivo se guardó correctamente
+      const fileExists: boolean = await invoke("file_exists", { path: savePath });
+      if (!fileExists) {
+        throw new Error(`Archivo no encontrado después de guardar: ${savePath}`);
+      }
+
       // Re-scan library directly (can't call hooks outside component)
       const results: ScanResult[] = await invoke("scan_directory", { dirPath: libraryPath });
+      console.log(`[download] scan_directory retornó ${results.length} libros, libraryPath=${libraryPath}, savePath=${savePath}`);
       const scannedBooks = mapScanResults(results);
       setBooks(scannedBooks);
 
+      // Verificar que el libro aparece en el scan
+      const found = results.some(r => r.path === savePath);
       showAlert('success', copiedLocally ? 'Libro copiado (duplicado)' : 'Libro descargado',
         copiedLocally
           ? `"${cloudBook.title}" se copió desde un archivo local idéntico`
-          : `"${cloudBook.title}" se guardó en tu biblioteca local`
+          : `"${cloudBook.title}" se guardó en tu biblioteca local${!found ? ' (⚠ no detectado en scan)' : ''}`
       );
     } catch (err: any) {
       showAlert('error', 'Error al descargar', err.message || 'No se pudo descargar el libro');
